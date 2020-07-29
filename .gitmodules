@@ -1,0 +1,3 @@
+[submodule "lib/hzzp"]
+	path = lib/hzzp
+	url = https://github.com/truemedian/hzzp
