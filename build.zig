@@ -19,7 +19,12 @@ pub fn build(b: *Builder) void {
         .name = "hzzp",
         .path = "lib/hzzp/src/main.zig",
     });
+    exe.addPackage(.{
+        .name = "zig-bearssl",
+        .path = "lib/zig-bearssl/bearssl.zig",
+    });
 
+    @import("lib/zig-bearssl/bearssl.zig").linkBearSSL("./lib/zig-bearssl", exe, target);
     exe.install();
 
     const run_cmd = exe.run();
