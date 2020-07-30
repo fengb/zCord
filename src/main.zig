@@ -15,8 +15,6 @@ const SslTunnel = struct {
     raw_writer: std.fs.File.Writer align(8),
 
     conn: Connection,
-    reader: Connection.DstInStream,
-    writer: Connection.DstOutStream,
 
     const Connection = ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer);
 
@@ -42,8 +40,6 @@ const SslTunnel = struct {
         result.raw_writer = result.raw_conn.writer();
 
         result.conn = ssl.initStream(result.client.getEngine(), &result.raw_reader, &result.raw_writer);
-        result.reader = result.conn.inStream();
-        result.writer = result.conn.outStream();
 
         return result;
     }
@@ -59,11 +55,11 @@ const SslTunnel = struct {
 };
 
 pub fn main() !void {
-    var ssl_tunnel = try SslTunnel.init(std.heap.c_allocator, @embedFile("../ssl503375-cloudflaressl-com-chain.pem"), "gateway.discord.gg", 443);
+    var ssl_tunnel = try SslTunnel.init(std.heap.c_allocator, @embedFile("../discord-gg-chain.pem"), "gateway.discord.gg", 443);
     errdefer ssl_tunnel.deinit();
 
     var buf: [0x1000]u8 = undefined;
-    var client = hzzp.BaseClient.create(&buf, &ssl_tunnel.reader, &ssl_tunnel.writer);
+    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
     try client.writeHead("GET", "/");
     try client.writeHeadComplete();
     try ssl_tunnel.conn.flush();
