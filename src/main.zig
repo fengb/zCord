@@ -90,11 +90,81 @@ pub fn requestGithubIssue(issue: u32) !void {
         return error.NoResponse;
     }
 
+    // Skip headers
     while (try client.readEvent()) |event| {
-        if (event == .chunk) {
-            std.debug.print("{}\n\n", .{event});
+        if (event == .head_complete) {
+            break;
         }
     }
+
+    var reader = hzzpChunkReader(client);
+    var tmp: [0x1000]u8 = undefined;
+    while (try reader.reader().readUntilDelimiterOrEof(&tmp, ',')) |line| {
+        std.debug.print("{}\n", .{line});
+    }
+}
+
+fn hzzpChunkReader(client: anytype) HzzpChunkReader(@TypeOf(client)) {
+    return .{ .client = client };
+}
+
+fn HzzpChunkReader(comptime Client: type) type {
+    return struct {
+        const Self = @This();
+        const Reader = std.io.Reader(*Self, Client.ReadError, readFn);
+
+        client: Client,
+        complete: bool = false,
+        chunk: ?hzzp.BaseClient.Chunk = null,
+        loc: usize = undefined,
+
+        fn readFn(self: *Self, buffer: []u8) Client.ReadError!usize {
+            if (self.complete) return 0;
+
+            if (self.chunk) |chunk| {
+                const remaining = chunk.data[self.loc..];
+                if (buffer.len < remaining.len) {
+                    std.mem.copy(u8, buffer, remaining[0..buffer.len]);
+                    self.loc += buffer.len;
+                    return buffer.len;
+                } else {
+                    std.mem.copy(u8, buffer, remaining);
+                    if (chunk.final) {
+                        self.complete = true;
+                    }
+                    self.chunk = null;
+                    return remaining.len;
+                }
+            } else {
+                const event = (try self.client.readEvent()) orelse {
+                    self.complete = true;
+                    return 0;
+                };
+
+                if (event != .chunk) {
+                    self.complete = true;
+                    return 0;
+                }
+
+                if (buffer.len < event.chunk.data.len) {
+                    std.mem.copy(u8, buffer, event.chunk.data[0..buffer.len]);
+                    self.chunk = event.chunk;
+                    self.loc = buffer.len;
+                    return buffer.len;
+                } else {
+                    std.mem.copy(u8, buffer, event.chunk.data);
+                    if (event.chunk.final) {
+                        self.complete = true;
+                    }
+                    return event.chunk.data.len;
+                }
+            }
+        }
+
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
+        }
+    };
 }
 
 pub fn main() !void {
