@@ -14,26 +14,29 @@ const SslTunnel = struct {
     raw_reader: std.fs.File.Reader align(8),
     raw_writer: std.fs.File.Writer align(8),
 
-    conn: Connection,
+    conn: ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer),
 
-    const Connection = ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer);
+    fn init(args: struct {
+        allocator: *std.mem.Allocator,
+        pem: []const u8,
+        host: [:0]const u8,
+        port: u16 = 443,
+    }) !*SslTunnel {
+        const result = try args.allocator.create(SslTunnel);
+        errdefer args.allocator.destroy(result);
 
-    fn init(allocator: *std.mem.Allocator, pem: []const u8, host: [:0]const u8, port: u16) !*SslTunnel {
-        const result = try allocator.create(SslTunnel);
-        errdefer allocator.destroy(result);
+        result.allocator = args.allocator;
 
-        result.allocator = allocator;
-
-        result.trust_anchor = ssl.TrustAnchorCollection.init(allocator);
+        result.trust_anchor = ssl.TrustAnchorCollection.init(args.allocator);
         errdefer result.trust_anchor.deinit();
-        try result.trust_anchor.appendFromPEM(pem);
+        try result.trust_anchor.appendFromPEM(args.pem);
 
         result.x509 = ssl.x509.Minimal.init(result.trust_anchor);
         result.client = ssl.Client.init(result.x509.getEngine());
         result.client.relocate();
-        try result.client.reset(host, false);
+        try result.client.reset(args.host, false);
 
-        result.raw_conn = try std.net.tcpConnectToHost(allocator, host, port);
+        result.raw_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
         errdefer result.raw_conn.close();
 
         result.raw_reader = result.raw_conn.reader();
@@ -55,7 +58,11 @@ const SslTunnel = struct {
 };
 
 pub fn main() !void {
-    var ssl_tunnel = try SslTunnel.init(std.heap.c_allocator, @embedFile("../discord-gg-chain.pem"), "gateway.discord.gg", 443);
+    var ssl_tunnel = try SslTunnel.init(.{
+        .allocator = std.heap.c_allocator,
+        .pem = @embedFile("../discord-gg-chain.pem"),
+        .host = "gateway.discord.gg",
+    });
     errdefer ssl_tunnel.deinit();
 
     var buf: [0x1000]u8 = undefined;
