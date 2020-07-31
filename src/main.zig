@@ -57,7 +57,7 @@ const SslTunnel = struct {
     }
 };
 
-pub fn main() !void {
+pub fn requestGithubIssue(issue: u32) !void {
     var ssl_tunnel = try SslTunnel.init(.{
         .allocator = std.heap.c_allocator,
         .pem = @embedFile("../github-com-chain.pem"),
@@ -65,18 +65,40 @@ pub fn main() !void {
     });
     errdefer ssl_tunnel.deinit();
 
-    var buf: [0x1000]u8 = undefined;
+    var buf: [0x10000]u8 = undefined;
     var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
-    try client.writeHead("GET", "/");
+
+    var path: [0x100]u8 = undefined;
+    try client.writeHead("GET", try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}));
+
     try client.writeHeader("Host", "api.github.com");
     try client.writeHeader("User-Agent", "zigbot9001/0.0.1");
     try client.writeHeader("Accept", "application/json");
     try client.writeHeadComplete();
     try ssl_tunnel.conn.flush();
 
-    while (try client.readEvent()) |event| {
-        std.debug.print("{}\n\n", .{event});
+    if (try client.readEvent()) |event| {
+        if (event != .status) {
+            return error.MissingStatus;
+        }
+        switch (event.status.code) {
+            200 => {}, // success!
+            404 => return error.NotFound,
+            else => @panic("Response not expected"),
+        }
+    } else {
+        return error.NoResponse;
     }
+
+    while (try client.readEvent()) |event| {
+        if (event == .chunk) {
+            std.debug.print("{}\n\n", .{event});
+        }
+    }
+}
+
+pub fn main() !void {
+    try requestGithubIssue(5076);
 }
 
 pub fn discord() !void {
