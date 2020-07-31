@@ -60,6 +60,28 @@ const SslTunnel = struct {
 pub fn main() !void {
     var ssl_tunnel = try SslTunnel.init(.{
         .allocator = std.heap.c_allocator,
+        .pem = @embedFile("../github-com-chain.pem"),
+        .host = "api.github.com",
+    });
+    errdefer ssl_tunnel.deinit();
+
+    var buf: [0x1000]u8 = undefined;
+    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+    try client.writeHead("GET", "/");
+    try client.writeHeader("Host", "api.github.com");
+    try client.writeHeader("User-Agent", "zigbot9001/0.0.1");
+    try client.writeHeader("Accept", "application/json");
+    try client.writeHeadComplete();
+    try ssl_tunnel.conn.flush();
+
+    while (try client.readEvent()) |event| {
+        std.debug.print("{}\n\n", .{event});
+    }
+}
+
+pub fn discord() !void {
+    var ssl_tunnel = try SslTunnel.init(.{
+        .allocator = std.heap.c_allocator,
         .pem = @embedFile("../discord-gg-chain.pem"),
         .host = "gateway.discord.gg",
     });
