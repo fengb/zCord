@@ -65,7 +65,7 @@ pub fn requestGithubIssue(issue: u32) !void {
     });
     errdefer ssl_tunnel.deinit();
 
-    var buf: [0x10000]u8 = undefined;
+    var buf: [0x1000]u8 = undefined;
     var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
 
     var path: [0x100]u8 = undefined;
