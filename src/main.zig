@@ -171,52 +171,95 @@ fn HzzpChunkReader(comptime Client: type) type {
 
 pub fn main() !void {
     // try requestGithubIssue(5076);
-    try discord();
-}
+    var discord_ws = try DiscordWs.init(std.heap.c_allocator);
 
-pub fn discord() !void {
-    var ssl_tunnel = try SslTunnel.init(.{
-        .allocator = std.heap.c_allocator,
-        .pem = @embedFile("../discord-gg-chain.pem"),
-        .host = "gateway.discord.gg",
-    });
-    errdefer ssl_tunnel.deinit();
-
-    var buf: [0x1000]u8 = undefined;
-    var client = wz.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
-
-    // Handshake
-    var handshake_headers = std.http.Headers.init(std.heap.c_allocator);
-    defer handshake_headers.deinit();
-    try handshake_headers.append("Host", "gateway.discord.gg", null);
-    try client.sendHandshake(&handshake_headers, "/?v=6&encoding=json");
-    try ssl_tunnel.conn.flush();
-    try client.waitForHandshake();
-
-    // Identify
-    try client.writer.print(
-        \\ {{
-        \\   "op": 2,
-        \\   "d": {{
-        \\     "token": "{0}",
-        \\     "properties": {{
-        \\       "$os": "{1}",
-        \\       "$browser": "{2}",
-        \\       "$device": "{2}"
-        \\     }}
-        \\   }}
-        \\ }}
-    ,
-        .{
-            "Bot 12345",
-            "linux",
-            "zigbot9001/0.0.1",
-        },
-    );
-    try ssl_tunnel.conn.flush();
-
-    while (try client.readEvent()) |event| {
+    while (try discord_ws.client.readEvent()) |event| {
         std.debug.print("{}\n\n", .{event});
     }
     std.debug.print("Terminus\n\n", .{});
 }
+
+const DiscordWs = struct {
+    allocator: *std.mem.Allocator,
+
+    ssl_tunnel: *SslTunnel,
+
+    client: wz.BaseClient.BaseClient(SslStream.DstInStream, SslStream.DstOutStream),
+    client_buffer: []u8,
+
+    const SslStream = std.meta.fieldInfo(SslTunnel, "conn").field_type;
+
+    pub fn init(allocator: *std.mem.Allocator) !*DiscordWs {
+        const result = try allocator.create(DiscordWs);
+        errdefer allocator.destroy(result);
+        result.allocator = allocator;
+
+        result.ssl_tunnel = try SslTunnel.init(.{
+            .allocator = allocator,
+            .pem = @embedFile("../discord-gg-chain.pem"),
+            .host = "gateway.discord.gg",
+        });
+        errdefer result.ssl_tunnel.deinit();
+
+        result.client_buffer = try allocator.alloc(u8, 0x1000);
+        errdefer allocator.free(result.client_buffer);
+
+        result.client = wz.BaseClient.create(
+            result.client_buffer,
+            result.ssl_tunnel.conn.inStream(),
+            result.ssl_tunnel.conn.outStream(),
+        );
+
+        // Handshake
+        var handshake_headers = std.http.Headers.init(allocator);
+        defer handshake_headers.deinit();
+        try handshake_headers.append("Host", "gateway.discord.gg", null);
+        try result.client.sendHandshake(&handshake_headers, "/?v=6&encoding=json");
+        try result.ssl_tunnel.conn.flush();
+        try result.client.waitForHandshake();
+
+        // Identify
+        try result.printMessage(
+            \\ {{
+            \\   "op": 2,
+            \\   "d": {{
+            \\     "compress": "false",
+            \\     "token": "{0}",
+            \\     "properties": {{
+            \\       "$os": "{1}",
+            \\       "$browser": "{2}",
+            \\       "$device": "{2}"
+            \\     }}
+            \\   }}
+            \\ }}
+        ,
+            .{
+                "Bot ",
+                "linux",
+                agent,
+            },
+        );
+
+        return result;
+    }
+
+    pub fn deinit(self: *DiscordWs) void {
+        self.ssl_tunnel.deinit();
+        self.client.close();
+        self.* = undefined;
+        self.allocator.destroy(self);
+    }
+
+    pub fn printMessage(self: *DiscordWs, comptime fmt: []const u8, args: anytype) !void {
+        var buf: [0x1000]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&buf, fmt, args);
+
+        try self.client.writeMessageHeader(.{ .length = msg.len, .opcode = 1 });
+
+        var masked = std.mem.zeroes([0x1000]u8);
+        self.client.maskPayload(msg, &masked);
+        try self.client.writeMessagePayload(masked[0..msg.len]);
+
+        try self.ssl_tunnel.conn.flush();
+    }
+};
