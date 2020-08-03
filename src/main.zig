@@ -171,7 +171,10 @@ fn HzzpChunkReader(comptime Client: type) type {
 
 pub fn main() !void {
     // try requestGithubIssue(5076);
-    var discord_ws = try DiscordWs.init(std.heap.c_allocator);
+    var discord_ws = try DiscordWs.init(
+        std.heap.c_allocator,
+        std.os.getenv("AUTH") orelse return error.AuthNotFound,
+    );
 
     while (try discord_ws.client.readEvent()) |event| {
         std.debug.print("{}\n\n", .{event});
@@ -189,7 +192,7 @@ const DiscordWs = struct {
 
     const SslStream = std.meta.fieldInfo(SslTunnel, "conn").field_type;
 
-    pub fn init(allocator: *std.mem.Allocator) !*DiscordWs {
+    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8) !*DiscordWs {
         const result = try allocator.create(DiscordWs);
         errdefer allocator.destroy(result);
         result.allocator = allocator;
@@ -224,7 +227,7 @@ const DiscordWs = struct {
             \\   "op": 2,
             \\   "d": {{
             \\     "compress": "false",
-            \\     "token": "{0}",
+            \\     "token": "Bot {0}",
             \\     "properties": {{
             \\       "$os": "{1}",
             \\       "$browser": "{2}",
@@ -234,8 +237,8 @@ const DiscordWs = struct {
             \\ }}
         ,
             .{
-                "Bot ",
-                "linux",
+                auth_token,
+                @tagName(std.Target.current.os.tag),
                 agent,
             },
         );
