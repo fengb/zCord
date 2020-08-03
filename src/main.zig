@@ -13,9 +13,8 @@ const SslTunnel = struct {
     client: ssl.Client,
 
     raw_conn: std.fs.File,
-    // TODO: why do these need to be overaligned?
-    raw_reader: std.fs.File.Reader align(8),
-    raw_writer: std.fs.File.Writer align(8),
+    raw_reader: std.fs.File.Reader,
+    raw_writer: std.fs.File.Writer,
 
     conn: ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer),
 
