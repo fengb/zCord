@@ -1,6 +1,9 @@
 const std = @import("std");
 const hzzp = @import("hzzp");
+const wz = @import("wz");
 const ssl = @import("zig-bearssl");
+
+const agent = "zigbot9001/0.0.1";
 
 const SslTunnel = struct {
     allocator: *std.mem.Allocator,
@@ -72,7 +75,7 @@ pub fn requestGithubIssue(issue: u32) !void {
     try client.writeHead("GET", try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}));
 
     try client.writeHeader("Host", "api.github.com");
-    try client.writeHeader("User-Agent", "zigbot9001/0.0.1");
+    try client.writeHeader("User-Agent", agent);
     try client.writeHeader("Accept", "application/json");
     try client.writeHeadComplete();
     try ssl_tunnel.conn.flush();
@@ -168,7 +171,8 @@ fn HzzpChunkReader(comptime Client: type) type {
 }
 
 pub fn main() !void {
-    try requestGithubIssue(5076);
+    // try requestGithubIssue(5076);
+    try discord();
 }
 
 pub fn discord() !void {
@@ -180,12 +184,40 @@ pub fn discord() !void {
     errdefer ssl_tunnel.deinit();
 
     var buf: [0x1000]u8 = undefined;
-    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
-    try client.writeHead("GET", "/");
-    try client.writeHeadComplete();
+    var client = wz.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+
+    // Handshake
+    var handshake_headers = std.http.Headers.init(std.heap.c_allocator);
+    defer handshake_headers.deinit();
+    try handshake_headers.append("Host", "gateway.discord.gg", null);
+    try client.sendHandshake(&handshake_headers, "/?v=6&encoding=json");
+    try ssl_tunnel.conn.flush();
+    try client.waitForHandshake();
+
+    // Identify
+    try client.writer.print(
+        \\ {{
+        \\   "op": 2,
+        \\   "d": {{
+        \\     "token": "{0}",
+        \\     "properties": {{
+        \\       "$os": "{1}",
+        \\       "$browser": "{2}",
+        \\       "$device": "{2}"
+        \\     }}
+        \\   }}
+        \\ }}
+    ,
+        .{
+            "Bot 12345",
+            "linux",
+            "zigbot9001/0.0.1",
+        },
+    );
     try ssl_tunnel.conn.flush();
 
     while (try client.readEvent()) |event| {
         std.debug.print("{}\n\n", .{event});
     }
+    std.debug.print("Terminus\n\n", .{});
 }
