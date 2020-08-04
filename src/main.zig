@@ -189,6 +189,11 @@ const DiscordWs = struct {
 
     client: wz.BaseClient.BaseClient(SslStream.DstInStream, SslStream.DstOutStream),
     client_buffer: []u8,
+    write_mutex: std.Mutex,
+
+    heartbeat_interval: usize,
+    heartbeat_seq: ?usize,
+    heartbeat_thread: *std.Thread,
 
     const SslStream = std.meta.fieldInfo(SslTunnel, "conn").field_type;
 
@@ -196,6 +201,9 @@ const DiscordWs = struct {
         const result = try allocator.create(DiscordWs);
         errdefer allocator.destroy(result);
         result.allocator = allocator;
+
+        result.write_mutex = std.Mutex.init();
+        errdefer result.write_mutex.deinit();
 
         result.ssl_tunnel = try SslTunnel.init(.{
             .allocator = allocator,
@@ -243,6 +251,10 @@ const DiscordWs = struct {
             },
         );
 
+        result.heartbeat_interval = 5_000;
+        result.heartbeat_seq = 1;
+        result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
+
         return result;
     }
 
@@ -257,6 +269,9 @@ const DiscordWs = struct {
         var buf: [0x1000]u8 = undefined;
         const msg = try std.fmt.bufPrint(&buf, fmt, args);
 
+        const held = self.write_mutex.acquire();
+        defer held.release();
+
         try self.client.writeMessageHeader(.{ .length = msg.len, .opcode = 1 });
 
         var masked = std.mem.zeroes([0x1000]u8);
@@ -264,5 +279,18 @@ const DiscordWs = struct {
         try self.client.writeMessagePayload(masked[0..msg.len]);
 
         try self.ssl_tunnel.conn.flush();
+    }
+
+    fn heartbeatHandler(self: *DiscordWs) !void {
+        while (true) {
+            std.time.sleep(self.heartbeat_interval * 1_000_000);
+
+            try self.printMessage(
+                \\ {{
+                \\   "op": 1,
+                \\   "d": {}
+                \\ }}
+            , .{self.heartbeat_seq});
+        }
     }
 };
