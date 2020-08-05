@@ -53,7 +53,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         if (ctx.parser.state != old_state) {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
-                                .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
+                                .Number, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
                                 .TrueLiteral1 => break :blk .Boolean,
                                 .FalseLiteral1 => break :blk .Boolean,
                                 .NullLiteral1 => break :blk .Null,
@@ -151,7 +151,8 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
 
                 switch (self.ctx.parser.state) {
-                    .ValueBegin => {},
+                    .ValueBegin, .ValueBeginNoClosing => {},
+                    .TopLevelEnd => return null,
                     .ValueEnd => {
                         while (true) {
                             var token1: ?std_json.Token = undefined;
@@ -201,47 +202,53 @@ fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
 }
 
 test "boolean" {
-    var fba = std.io.fixedBufferStream("true");
+    var fba = std.io.fixedBufferStream("[true]");
     var stream = streamJson(fba.reader());
 
     const root = try stream.root();
-    expectEqual(root.kind, .Boolean);
-    expectEqual(try root.boolean(), true);
+    const element = (try root.arrayNext()).?;
+    expectEqual(element.kind, .Boolean);
+    expectEqual(try element.boolean(), true);
 }
 
 test "null" {
-    var fba = std.io.fixedBufferStream("null");
+    var fba = std.io.fixedBufferStream("[null]");
     var stream = streamJson(fba.reader());
 
     const root = try stream.root();
-    expectEqual(root.kind, .Null);
-    expectEqual(try root.optionalBoolean(), null);
+    const element = (try root.arrayNext()).?;
+    expectEqual(element.kind, .Null);
+    expectEqual(try element.optionalBoolean(), null);
 }
 
 test "number" {
     {
-        var fba = std.io.fixedBufferStream("1 ");
+        var fba = std.io.fixedBufferStream("[1]");
         var stream = streamJson(fba.reader());
 
         const root = try stream.root();
-        // expectEqual(root.kind, .Number);
-        expectEqual(try root.number(u8), 1);
+        const element = (try root.arrayNext()).?;
+        // expectEqual(element.kind, .Number);
+        expectEqual(try element.number(u8), 1);
     }
     {
-        var fba = std.io.fixedBufferStream("123 ");
+        // Technically invalid, but we don't stream far enough to find out
+        var fba = std.io.fixedBufferStream("[123,]");
         var stream = streamJson(fba.reader());
 
         const root = try stream.root();
-        // expectEqual(root.kind, .Number);
-        expectEqual(try root.number(u8), 123);
+        const element = (try root.arrayNext()).?;
+        // expectEqual(element.kind, .Number);
+        expectEqual(try element.number(u8), 123);
     }
     {
-        var fba = std.io.fixedBufferStream("456 ");
+        var fba = std.io.fixedBufferStream("[456]");
         var stream = streamJson(fba.reader());
 
         const root = try stream.root();
-        // expectEqual(root.kind, .Number);
-        expectEqual(root.number(u8), error.Overflow);
+        const element = (try root.arrayNext()).?;
+        // expectEqual(element.kind, .Number);
+        expectEqual(element.number(u8), error.Overflow);
     }
 }
 
@@ -268,6 +275,37 @@ test "array of simple values" {
     if (try root.arrayNext()) |item| {
         expectEqual(item.kind, .Null);
         expectEqual(try item.optionalBoolean(), null);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    expectEqual(try root.arrayNext(), null);
+}
+
+test "array of numbers" {
+    var fba = std.io.fixedBufferStream("[1, 2, 3]");
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Array);
+
+    if (try root.arrayNext()) |item| {
+        // expectEqual(item.kind, .Number);
+        expectEqual(try item.number(u8), 1);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    if (try root.arrayNext()) |item| {
+        // expectEqual(item.kind, .Number);
+        expectEqual(try item.number(u8), 2);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    if (try root.arrayNext()) |item| {
+        // expectEqual(item.kind, .Number);
+        expectEqual(try item.number(u8), 3);
     } else {
         std.debug.panic("Expected a value", .{});
     }
