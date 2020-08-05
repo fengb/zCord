@@ -90,7 +90,10 @@ pub fn StreamJson(comptime Reader: type) type {
                     return error.WrongElementType;
                 }
 
-                const max_digits = std.math.log10(std.math.maxInt(T)) + 2;
+                // +1 for converting floor -> ceil
+                // +1 for negative sign
+                // +1 for simplifying terminating character detection
+                const max_digits = std.math.log10(std.math.maxInt(T)) + 3;
                 var buffer: [max_digits]u8 = undefined;
 
                 // Handle first byte manually
@@ -99,7 +102,6 @@ pub fn StreamJson(comptime Reader: type) type {
                     var token2: ?std_json.Token = undefined;
 
                     buffer[0] = self.kind.Number.first_char;
-                    try self.ctx.parser.feed(buffer[0], &token1, &token2);
                     std.debug.assert(token1 == null);
                 }
 
@@ -113,8 +115,7 @@ pub fn StreamJson(comptime Reader: type) type {
                     if (token1) |tok| {
                         const len = i + 1;
                         std.debug.assert(tok == .Number);
-                        // tok.Number.count includes the terminating char (e.g. ' ' or ',')
-                        std.debug.assert(tok.Number.count - 1 == len);
+                        std.debug.assert(tok.Number.count == len);
                         return try std.fmt.parseInt(T, buffer[0..len], 10);
                     } else {
                         c.* = byte;
@@ -242,6 +243,15 @@ test "number" {
         expectEqual(try element.number(u8), 123);
     }
     {
+        var fba = std.io.fixedBufferStream("[-128]");
+        var stream = streamJson(fba.reader());
+
+        const root = try stream.root();
+        const element = (try root.arrayNext()).?;
+        // expectEqual(element.kind, .Number);
+        expectEqual(try element.number(i8), -128);
+    }
+    {
         var fba = std.io.fixedBufferStream("[456]");
         var stream = streamJson(fba.reader());
 
@@ -283,7 +293,7 @@ test "array of simple values" {
 }
 
 test "array of numbers" {
-    var fba = std.io.fixedBufferStream("[1, 2, 3]");
+    var fba = std.io.fixedBufferStream("[1, 2, -3]");
     var stream = streamJson(fba.reader());
 
     const root = try stream.root();
@@ -305,7 +315,7 @@ test "array of numbers" {
 
     if (try root.arrayNext()) |item| {
         // expectEqual(item.kind, .Number);
-        expectEqual(try item.number(u8), 3);
+        expectEqual(try item.number(i8), -3);
     } else {
         std.debug.panic("Expected a value", .{});
     }
