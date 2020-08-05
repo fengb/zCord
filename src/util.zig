@@ -17,8 +17,13 @@ pub fn StreamJson(comptime Reader: type) type {
         parser: std_json.StreamingParser,
         _root: ?Element,
 
-        const ElementType = enum {
-            Object, Array, String, Number, Boolean, Null
+        const ElementType = union(enum) {
+            Object: void,
+            Array: void,
+            String: void,
+            Number: struct { first_char: u8 },
+            Boolean: void,
+            Null: void,
         };
 
         const Element = struct {
@@ -34,7 +39,8 @@ pub fn StreamJson(comptime Reader: type) type {
                         var token2: ?std_json.Token = undefined;
 
                         const old_state = ctx.parser.state;
-                        try ctx.parser.feed(try ctx.reader.readByte(), &token1, &token2);
+                        const byte = try ctx.reader.readByte();
+                        try ctx.parser.feed(byte, &token1, &token2);
 
                         if (token1) |tok| {
                             switch (tok) {
@@ -47,7 +53,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         if (ctx.parser.state != old_state) {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
-                                .Number => break :blk .Number,
+                                .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
                                 .TrueLiteral1 => break :blk .Boolean,
                                 .FalseLiteral1 => break :blk .Boolean,
                                 .NullLiteral1 => break :blk .Null,
@@ -77,6 +83,45 @@ pub fn StreamJson(comptime Reader: type) type {
                     .False => return false,
                     else => std.debug.panic("Token unrecognized: {}", .{token1}),
                 }
+            }
+
+            pub fn number(self: Element, comptime T: type) !T {
+                if (self.kind != .Number) {
+                    return error.WrongElementType;
+                }
+
+                const max_digits = std.math.log10(std.math.maxInt(T)) + 2;
+                var buffer: [max_digits]u8 = undefined;
+
+                // Handle first byte manually
+                {
+                    var token1: ?std_json.Token = null;
+                    var token2: ?std_json.Token = undefined;
+
+                    buffer[0] = self.kind.Number.first_char;
+                    try self.ctx.parser.feed(buffer[0], &token1, &token2);
+                    std.debug.assert(token1 == null);
+                }
+
+                for (buffer[1..]) |*c, i| {
+                    var token1: ?std_json.Token = null;
+                    var token2: ?std_json.Token = undefined;
+
+                    const byte = try self.ctx.reader.readByte();
+                    try self.ctx.parser.feed(byte, &token1, &token2);
+
+                    if (token1) |tok| {
+                        const len = i + 1;
+                        std.debug.assert(tok == .Number);
+                        // tok.Number.count includes the terminating char (e.g. ' ' or ',')
+                        std.debug.assert(tok.Number.count - 1 == len);
+                        return try std.fmt.parseInt(T, buffer[0..len], 10);
+                    } else {
+                        c.* = byte;
+                    }
+                }
+
+                return error.Overflow;
             }
 
             pub fn optionalBoolean(self: Element) !?bool {
@@ -155,9 +200,53 @@ fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
     std.testing.expectEqual(expected, actual);
 }
 
+test "boolean" {
+    var fba = std.io.fixedBufferStream("true");
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Boolean);
+    expectEqual(try root.boolean(), true);
+}
+
+test "null" {
+    var fba = std.io.fixedBufferStream("null");
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Null);
+    expectEqual(try root.optionalBoolean(), null);
+}
+
+test "number" {
+    {
+        var fba = std.io.fixedBufferStream("1 ");
+        var stream = streamJson(fba.reader());
+
+        const root = try stream.root();
+        // expectEqual(root.kind, .Number);
+        expectEqual(try root.number(u8), 1);
+    }
+    {
+        var fba = std.io.fixedBufferStream("123 ");
+        var stream = streamJson(fba.reader());
+
+        const root = try stream.root();
+        // expectEqual(root.kind, .Number);
+        expectEqual(try root.number(u8), 123);
+    }
+    {
+        var fba = std.io.fixedBufferStream("456 ");
+        var stream = streamJson(fba.reader());
+
+        const root = try stream.root();
+        // expectEqual(root.kind, .Number);
+        expectEqual(root.number(u8), error.Overflow);
+    }
+}
+
 test "array of simple values" {
     var fba = std.io.fixedBufferStream("[false, true, null]");
-
     var stream = streamJson(fba.reader());
 
     const root = try stream.root();
