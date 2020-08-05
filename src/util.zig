@@ -33,24 +33,20 @@ pub fn StreamJson(comptime Reader: type) type {
             pub fn init(ctx: *Stream) !Element {
                 ctx.assertState(.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
 
+                const start_state = ctx.parser.state;
                 const kind: ElementType = blk: {
                     while (true) {
-                        var token1: ?std_json.Token = undefined;
-                        var token2: ?std_json.Token = undefined;
-
-                        const old_state = ctx.parser.state;
                         const byte = try ctx.reader.readByte();
-                        try ctx.parser.feed(byte, &token1, &token2);
 
-                        if (token1) |tok| {
-                            switch (tok) {
+                        if (try ctx.feed(byte)) |token| {
+                            switch (token) {
                                 .ArrayBegin => break :blk .Array,
                                 .ObjectBegin => break :blk .Object,
-                                else => std.debug.panic("Element unrecognized: {}", .{tok}),
+                                else => std.debug.panic("Element unrecognized: {}", .{token}),
                             }
                         }
 
-                        if (ctx.parser.state != old_state) {
+                        if (ctx.parser.state != start_state) {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
                                 .Number, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
@@ -74,7 +70,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 switch (try self.finalizeToken()) {
                     .True => return true,
                     .False => return false,
-                    else => |tok| std.debug.panic("Token unrecognized: {}", .{tok}),
+                    else => |token| std.debug.panic("Token unrecognized: {}", .{token}),
                 }
             }
 
@@ -109,16 +105,12 @@ pub fn StreamJson(comptime Reader: type) type {
                 buffer[0] = self.kind.Number.first_char;
 
                 for (buffer[1..]) |*c, i| {
-                    var token1: ?std_json.Token = null;
-                    var token2: ?std_json.Token = undefined;
-
                     const byte = try self.ctx.reader.readByte();
-                    try self.ctx.parser.feed(byte, &token1, &token2);
 
-                    if (token1) |tok| {
+                    if (try self.ctx.feed(byte)) |token| {
                         const len = i + 1;
-                        std.debug.assert(tok == .Number);
-                        std.debug.assert(tok.Number.count == len);
+                        std.debug.assert(token == .Number);
+                        std.debug.assert(token.Number.count == len);
                         return try std.fmt.parseInt(T, buffer[0..len], 10);
                     } else {
                         c.* = byte;
@@ -138,15 +130,10 @@ pub fn StreamJson(comptime Reader: type) type {
                     .TopLevelEnd => return null,
                     .ValueEnd => {
                         while (true) {
-                            var token1: ?std_json.Token = undefined;
-                            var token2: ?std_json.Token = undefined;
-
-                            try self.ctx.parser.feed(try self.ctx.reader.readByte(), &token1, &token2);
-
-                            if (token1) |tok| {
-                                switch (tok) {
+                            if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                                switch (token) {
                                     .ArrayEnd => return null,
-                                    else => std.debug.panic("Token unrecognized: {}", .{token1}),
+                                    else => std.debug.panic("Token unrecognized: {}", .{token}),
                                 }
                             }
 
@@ -173,14 +160,11 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             fn finalizeToken(self: Element) !std_json.Token {
-                var token1: ?std_json.Token = null;
-                var token2: ?std_json.Token = undefined;
-
-                while (token1 == null) {
-                    try self.ctx.parser.feed(try self.ctx.reader.readByte(), &token1, &token2);
+                while (true) {
+                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        return token;
+                    }
                 }
-
-                return token1.?;
             }
         };
 
@@ -198,6 +182,15 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
             }
             std.debug.panic("Unexpected state: {}", .{ctx.parser.state});
+        }
+
+        // A simpler feed() to enable one liners.
+        // token2 can only be close object/array and we don't need it
+        fn feed(ctx: *Stream, byte: u8) !?std_json.Token {
+            var token1: ?std_json.Token = undefined;
+            var token2: ?std_json.Token = undefined;
+            try ctx.parser.feed(byte, &token1, &token2);
+            return token1;
         }
     };
 }
