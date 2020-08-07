@@ -120,6 +120,26 @@ pub fn StreamJson(comptime Reader: type) type {
                 return error.Overflow;
             }
 
+            pub fn stringBuffer(self: Element, buffer: []u8) ![]u8 {
+                if (self.kind != .String) {
+                    return error.WrongElementType;
+                }
+
+                for (buffer) |*c, i| {
+                    const byte = try self.ctx.reader.readByte();
+
+                    if (try self.ctx.feed(byte)) |token| {
+                        std.debug.assert(token == .String);
+                        std.debug.assert(token.String.count == i);
+                        return buffer[0..i];
+                    } else {
+                        c.* = byte;
+                    }
+                }
+
+                return error.NoSpaceLeft;
+            }
+
             pub fn arrayNext(self: Element) !?Element {
                 if (self.kind != .Array) {
                     return error.WrongElementType;
@@ -259,6 +279,20 @@ test "number" {
     }
 }
 
+test "string" {
+    {
+        var fba = std.io.fixedBufferStream(
+            \\"hello world"
+        );
+        var stream = streamJson(fba.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualSlices(u8, "hello world", try element.stringBuffer(&buffer));
+    }
+}
+
 test "array of simple values" {
     var fba = std.io.fixedBufferStream("[false, true, null]");
     var stream = streamJson(fba.reader());
@@ -313,6 +347,34 @@ test "array of numbers" {
     if (try root.arrayNext()) |item| {
         // expectEqual(item.kind, .Number);
         expectEqual(try item.number(i8), -3);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    expectEqual(try root.arrayNext(), null);
+}
+
+test "array of strings" {
+    var fba = std.io.fixedBufferStream(
+        \\["hello", "world"]);
+    );
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Array);
+
+    if (try root.arrayNext()) |item| {
+        var buffer: [100]u8 = undefined;
+        expectEqual(item.kind, .String);
+        std.testing.expectEqualSlices(u8, "hello", try item.stringBuffer(&buffer));
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    if (try root.arrayNext()) |item| {
+        var buffer: [100]u8 = undefined;
+        expectEqual(item.kind, .String);
+        std.testing.expectEqualSlices(u8, "world", try item.stringBuffer(&buffer));
     } else {
         std.debug.panic("Expected a value", .{});
     }
