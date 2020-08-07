@@ -145,27 +145,71 @@ pub fn StreamJson(comptime Reader: type) type {
                     return error.WrongElementType;
                 }
 
-                switch (self.ctx.parser.state) {
-                    .ValueBegin, .ValueBeginNoClosing => {},
-                    .TopLevelEnd => return null,
-                    .ValueEnd => {
-                        while (true) {
-                            if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
-                                switch (token) {
-                                    .ArrayEnd => return null,
-                                    else => std.debug.panic("Token unrecognized: {}", .{token}),
-                                }
-                            }
-
-                            if (self.ctx.parser.state == .ValueBeginNoClosing) {
-                                return try Element.init(self.ctx);
-                            }
-                        }
-                    },
-                    else => std.debug.panic("State unrecognized: {}", .{self.ctx.parser.state}),
+                if (self.ctx.parser.state == .TopLevelEnd) {
+                    return null;
+                }
+                while (self.ctx.parser.state == .ValueEnd) {
+                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        std.debug.assert(token == .ArrayEnd);
+                        return null;
+                    }
                 }
 
                 return try Element.init(self.ctx);
+            }
+
+            const ObjectMatch = struct {
+                key: []const u8,
+                value: Element,
+            };
+
+            pub fn objectMatch(self: Element, key: []const u8) !?ObjectMatch {
+                if (self.kind != .Object) {
+                    return error.WrongElementType;
+                }
+
+                if (self.ctx.parser.state == .TopLevelEnd) {
+                    return null;
+                }
+                while (self.ctx.parser.state == .ValueEnd) {
+                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        std.debug.assert(token == .ObjectEnd);
+                        return null;
+                    }
+                }
+
+                const key_element = try Element.init(self.ctx);
+                std.debug.assert(key_element.kind == .String);
+
+                for (key) |char| {
+                    const byte = try self.ctx.reader.readByte();
+                    _ = try self.ctx.feed(byte);
+                    if (char != byte) {
+                        break;
+                    }
+                } else {
+                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        std.debug.assert(token == .String);
+
+                        // Skip over the colon
+                        while (self.ctx.parser.state == .ObjectSeparator) {
+                            _ = try self.ctx.feed(try self.ctx.reader.readByte());
+                        }
+
+                        // Match detected
+                        return ObjectMatch{
+                            .key = key,
+                            .value = try Element.init(self.ctx),
+                        };
+                    }
+                }
+
+                const key_token = try key_element.finalizeToken();
+                std.debug.assert(key_token == .String);
+
+                // Skip over value as well
+
+                return null;
             }
 
             fn checkOptional(self: Element) !bool {
@@ -380,4 +424,32 @@ test "array of strings" {
     }
 
     expectEqual(try root.arrayNext(), null);
+}
+
+test "object match" {
+    var fba = std.io.fixedBufferStream(
+        \\{"foo": true, "bar": false}
+    );
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Object);
+
+    if (try root.objectMatch("foo")) |match| {
+        std.testing.expectEqualSlices(u8, "foo", match.key);
+        var buffer: [100]u8 = undefined;
+        expectEqual(match.value.kind, .Boolean);
+        expectEqual(try match.value.boolean(), true);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    if (try root.objectMatch("bar")) |match| {
+        std.testing.expectEqualSlices(u8, "bar", match.key);
+        var buffer: [100]u8 = undefined;
+        expectEqual(match.value.kind, .Boolean);
+        expectEqual(try match.value.boolean(), false);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
 }
