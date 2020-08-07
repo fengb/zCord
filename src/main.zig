@@ -3,6 +3,8 @@ const hzzp = @import("hzzp");
 const wz = @import("wz");
 const ssl = @import("zig-bearssl");
 
+const util = @import("util.zig");
+
 const agent = "zigbot9001/0.0.1";
 
 const SslTunnel = struct {
@@ -176,6 +178,24 @@ pub fn main() !void {
         std.os.getenv("AUTH") orelse return error.AuthNotFound,
     );
 
+    if (false) {
+        while (try discord_ws.client.readDispatch()) |event| {
+            if (!std.mem.eql(u8, event.name, "MESSAGE_CREATED")) continue;
+
+            var channel_id = [_]u8{0} ** 32;
+            var issue = [_]u8{0} ** 10;
+            while (try event.element.objectMatch(&[_]u8{ "content", "channel_id" })) |match| {
+                switch (match.key) {
+                    "content" => {
+                        while (try match.element.stringByte()) |byte| {
+                            "%%std.fmt.print";
+                        }
+                    },
+                    "channel_id" => match.element.stringBuffer(&channel_id),
+                }
+            }
+        }
+    }
     while (try discord_ws.client.readEvent()) |event| {
         std.debug.print("{}\n\n", .{event});
     }
@@ -196,6 +216,31 @@ const DiscordWs = struct {
     heartbeat_thread: *std.Thread,
 
     const SslStream = std.meta.fieldInfo(SslTunnel, "conn").field_type;
+
+    const Opcode = enum {
+        /// An event was dispatched.
+        dispatch = 0,
+        /// Fired periodically by the client to keep the connection alive.
+        heartbeat = 1,
+        /// Starts a new session during the initial handshake.
+        identify = 2,
+        /// Update the client's presence.
+        presence_update = 3,
+        /// Used to join/leave or move between voice channels.
+        voice_state_update = 4,
+        /// Resume a previous session that was disconnected.
+        @"resume" = 6,
+        /// You should attempt to reconnect and resume immediately.
+        reconnect = 7,
+        /// Request information about offline guild members in a large guild.
+        request_guild_members = 8,
+        /// The session has been invalidated. You should reconnect and identify/resume accordingly.
+        invalid_session = 9,
+        /// Sent immediately after connecting, contains the heartbeat_interval to use.
+        hello = 10,
+        /// Sent in response to receiving a heartbeat to acknowledge that it has been received.
+        heartbeat_ack = 11,
+    };
 
     pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8) !*DiscordWs {
         const result = try allocator.create(DiscordWs);
@@ -229,6 +274,28 @@ const DiscordWs = struct {
         try result.ssl_tunnel.conn.flush();
         try result.client.waitForHandshake();
 
+        if (try result.client.readEvent()) |event| {
+            std.debug.assert(event == .header);
+        }
+        if (try result.client.readEvent()) |event| {
+            std.debug.print("{}\n", .{event.chunk.data});
+            result.heartbeat_interval = 0;
+
+            var fba = std.io.fixedBufferStream(event.chunk.data);
+            var stream = util.streamJson(fba.reader());
+
+            const root = try stream.root();
+            while (try root.objectMatch("d")) |d| {
+                while (try d.value.objectMatch("heartbeat_interval")) |hbi| {
+                    result.heartbeat_interval = try hbi.value.number(u32);
+                }
+            }
+
+            if (result.heartbeat_interval == 0) {
+                return error.NoHeartbeatDetected;
+            }
+        }
+
         // Identify
         try result.printMessage(
             \\ {{
@@ -251,8 +318,7 @@ const DiscordWs = struct {
             },
         );
 
-        result.heartbeat_interval = 5_000;
-        result.heartbeat_seq = 1;
+        result.heartbeat_seq = null;
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
         return result;
