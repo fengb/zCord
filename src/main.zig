@@ -285,14 +285,26 @@ const DiscordWs = struct {
             var stream = util.streamJson(fba.reader());
 
             const root = try stream.root();
-            while (try root.objectMatch("d")) |d| {
-                while (try d.value.objectMatch("heartbeat_interval")) |hbi| {
-                    result.heartbeat_interval = try hbi.value.number(u32);
+            while (try root.objectMatchAny(&[_][]const u8{ "op", "d" })) |match| {
+                const swh = util.Swhash(2);
+                switch (swh.match(match.key)) {
+                    swh.case("op") => {
+                        const op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
+                        if (op != .hello) {
+                            return error.MalformedHelloResponse;
+                        }
+                    },
+                    swh.case("d") => {
+                        while (try match.value.objectMatch("heartbeat_interval")) |hbi| {
+                            result.heartbeat_interval = try hbi.value.number(u32);
+                        }
+                    },
+                    else => unreachable,
                 }
             }
 
             if (result.heartbeat_interval == 0) {
-                return error.NoHeartbeatDetected;
+                return error.MalformedHelloResponse;
             }
         }
 
