@@ -18,15 +18,15 @@ pub fn StreamJson(comptime Reader: type) type {
         _root: ?Element,
 
         const ElementType = union(enum) {
-            Object: void,
-            Array: void,
+            Object: struct { stack_level: u8 },
+            Array: struct { stack_level: u8 },
             String: void,
             Number: struct { first_char: u8 },
             Boolean: void,
             Null: void,
         };
 
-        const Element = struct {
+        pub const Element = struct {
             ctx: *Stream,
             kind: ElementType,
 
@@ -40,8 +40,8 @@ pub fn StreamJson(comptime Reader: type) type {
 
                         if (try ctx.feed(byte)) |token| {
                             switch (token) {
-                                .ArrayBegin => break :blk .Array,
-                                .ObjectBegin => break :blk .Object,
+                                .ArrayBegin => break :blk .{ .Array = .{ .stack_level = ctx.parser.stack_used } },
+                                .ObjectBegin => break :blk .{ .Object = .{ .stack_level = ctx.parser.stack_used } },
                                 else => std.debug.panic("Element unrecognized: {}", .{token}),
                             }
                         }
@@ -50,8 +50,7 @@ pub fn StreamJson(comptime Reader: type) type {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
                                 .Number, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
-                                .TrueLiteral1 => break :blk .Boolean,
-                                .FalseLiteral1 => break :blk .Boolean,
+                                .TrueLiteral1, .FalseLiteral1 => break :blk .Boolean,
                                 .NullLiteral1 => break :blk .Null,
                                 else => std.debug.panic("Element unrecognized: {}", .{ctx.parser.state}),
                             }
@@ -70,7 +69,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 switch (try self.finalizeToken()) {
                     .True => return true,
                     .False => return false,
-                    else => |token| std.debug.panic("Token unrecognized: {}", .{token}),
+                    else => unreachable,
                 }
             }
 
@@ -138,6 +137,14 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
 
                 return error.NoSpaceLeft;
+            }
+
+            pub fn optionalStringBuffer(self: Element, buffer: []u8) !?[]u8 {
+                if (try self.checkOptional()) {
+                    return null;
+                } else {
+                    return try self.stringBuffer(buffer);
+                }
             }
 
             pub fn arrayNext(self: Element) !?Element {
@@ -209,18 +216,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                         // Skip over value
                         const value_element = try Element.init(self.ctx);
-                        switch (value_element.kind) {
-                            .String, .Number, .Boolean, .Null => {
-                                // TODO: assert the token matches
-                                _ = try self.finalizeToken();
-                            },
-                            .Array, .Object => {
-                                const stack_start = self.ctx.parser.stack_used;
-                                while (self.ctx.parser.stack_used >= stack_start) {
-                                    _ = try self.finalizeToken();
-                                }
-                            },
-                        }
+                        _ = try self.finalizeToken();
                     }
                 }
             }
@@ -271,16 +267,31 @@ pub fn StreamJson(comptime Reader: type) type {
                 if (self.kind != .Null) return false;
                 self.ctx.assertState(.{.NullLiteral1});
 
-                const token = try self.finalizeToken();
-                if (token != .Null) {
-                    std.debug.panic("Token unrecognized: {}", .{token});
-                }
+                _ = try self.finalizeToken();
                 return true;
             }
 
-            fn finalizeToken(self: Element) !std_json.Token {
+            pub fn finalizeToken(self: Element) !std_json.Token {
                 while (true) {
                     if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        switch (self.kind) {
+                            .Boolean => std.debug.assert(token == .True or token == .False),
+                            .Null => std.debug.assert(token == .Null),
+                            .Number => std.debug.assert(token == .Number),
+                            .String => std.debug.assert(token == .String),
+                            .Array => |arr| {
+                                if (self.ctx.parser.stack_used >= arr.stack_level) {
+                                    continue;
+                                }
+                                std.debug.assert(token == .ArrayEnd);
+                            },
+                            .Object => |obj| {
+                                if (self.ctx.parser.stack_used >= obj.stack_level) {
+                                    continue;
+                                }
+                                std.debug.assert(token == .ObjectEnd);
+                            },
+                        }
                         return token;
                     }
                 }
@@ -314,8 +325,16 @@ pub fn StreamJson(comptime Reader: type) type {
     };
 }
 
-fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
+fn expectEqual(actual: anytype, expected: ExpectedType(@TypeOf(actual))) void {
     std.testing.expectEqual(expected, actual);
+}
+
+fn ExpectedType(comptime ActualType: type) type {
+    if (@typeInfo(ActualType) == .Union) {
+        return @TagType(ActualType);
+    } else {
+        return ActualType;
+    }
 }
 
 test "boolean" {
@@ -345,7 +364,7 @@ test "number" {
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
-        // expectEqual(element.kind, .Number);
+        expectEqual(element.kind, .Number);
         expectEqual(try element.number(u8), 1);
     }
     {
@@ -355,7 +374,7 @@ test "number" {
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
-        // expectEqual(element.kind, .Number);
+        expectEqual(element.kind, .Number);
         expectEqual(try element.number(u8), 123);
     }
     {
@@ -364,7 +383,7 @@ test "number" {
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
-        // expectEqual(element.kind, .Number);
+        expectEqual(element.kind, .Number);
         expectEqual(try element.number(i8), -128);
     }
     {
@@ -373,7 +392,7 @@ test "number" {
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
-        // expectEqual(element.kind, .Number);
+        expectEqual(element.kind, .Number);
         expectEqual(element.number(u8), error.Overflow);
     }
 }
@@ -430,21 +449,21 @@ test "array of numbers" {
     expectEqual(root.kind, .Array);
 
     if (try root.arrayNext()) |item| {
-        // expectEqual(item.kind, .Number);
+        expectEqual(item.kind, .Number);
         expectEqual(try item.number(u8), 1);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        // expectEqual(item.kind, .Number);
+        expectEqual(item.kind, .Number);
         expectEqual(try item.number(u8), 2);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        // expectEqual(item.kind, .Number);
+        expectEqual(item.kind, .Number);
         expectEqual(try item.number(i8), -3);
     } else {
         std.debug.panic("Expected a value", .{});
