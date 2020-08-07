@@ -148,6 +148,8 @@ pub fn StreamJson(comptime Reader: type) type {
                 if (self.ctx.parser.state == .TopLevelEnd) {
                     return null;
                 }
+
+                // Scan for next element
                 while (self.ctx.parser.state == .ValueEnd) {
                     if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
                         std.debug.assert(token == .ArrayEnd);
@@ -168,29 +170,23 @@ pub fn StreamJson(comptime Reader: type) type {
                     return error.WrongElementType;
                 }
 
-                if (self.ctx.parser.state == .TopLevelEnd) {
-                    return null;
-                }
-                while (self.ctx.parser.state == .ValueEnd) {
-                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
-                        std.debug.assert(token == .ObjectEnd);
+                while (true) {
+                    if (self.ctx.parser.state == .TopLevelEnd) {
                         return null;
                     }
-                }
 
-                const key_element = try Element.init(self.ctx);
-                std.debug.assert(key_element.kind == .String);
-
-                for (key) |char| {
-                    const byte = try self.ctx.reader.readByte();
-                    _ = try self.ctx.feed(byte);
-                    if (char != byte) {
-                        break;
+                    // Scan for next element
+                    while (self.ctx.parser.state == .ValueEnd) {
+                        if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                            std.debug.assert(token == .ObjectEnd);
+                            return null;
+                        }
                     }
-                } else {
-                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
-                        std.debug.assert(token == .String);
 
+                    const key_element = try Element.init(self.ctx);
+                    std.debug.assert(key_element.kind == .String);
+
+                    if (try key_element.stringEqual(key)) {
                         // Skip over the colon
                         while (self.ctx.parser.state == .ObjectSeparator) {
                             _ = try self.ctx.feed(try self.ctx.reader.readByte());
@@ -201,15 +197,49 @@ pub fn StreamJson(comptime Reader: type) type {
                             .key = key,
                             .value = try Element.init(self.ctx),
                         };
+                    } else {
+                        // Skip over the colon
+                        while (self.ctx.parser.state == .ObjectSeparator) {
+                            _ = try self.ctx.feed(try self.ctx.reader.readByte());
+                        }
+
+                        // Skip over value
+                        const value_element = try Element.init(self.ctx);
+                        switch (value_element.kind) {
+                            .String, .Number, .Boolean, .Null => {
+                                // TODO: assert the token matches
+                                _ = try self.finalizeToken();
+                            },
+                            .Array, .Object => {
+                                const stack_start = self.ctx.parser.stack_used;
+                                while (self.ctx.parser.stack_used >= stack_start) {
+                                    _ = try self.finalizeToken();
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+
+            fn stringEqual(self: Element, string: []const u8) !bool {
+                std.debug.assert(self.kind == .String);
+
+                for (string) |char| {
+                    const byte = try self.ctx.reader.readByte();
+                    _ = try self.ctx.feed(byte);
+                    if (char != byte) {
+                        break;
+                    }
+                } else {
+                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        std.debug.assert(token == .String);
+                        return true;
                     }
                 }
 
-                const key_token = try key_element.finalizeToken();
-                std.debug.assert(key_token == .String);
-
-                // Skip over value as well
-
-                return null;
+                const token = try self.finalizeToken();
+                std.debug.assert(token == .String);
+                return false;
             }
 
             fn checkOptional(self: Element) !bool {
@@ -452,4 +482,16 @@ test "object match" {
     } else {
         std.debug.panic("Expected a value", .{});
     }
+}
+
+test "object match not found" {
+    var fba = std.io.fixedBufferStream(
+        \\{"foo": [[]], "bar": false, "baz": {}}
+    );
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Object);
+
+    expectEqual(try root.objectMatch("???"), null);
 }
