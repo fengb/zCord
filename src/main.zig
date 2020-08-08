@@ -57,11 +57,72 @@ const SslTunnel = struct {
         self.trust_anchor.deinit();
 
         self.* = undefined;
-        errdefer self.allocator.destroy(self);
+        self.allocator.destroy(self);
     }
 };
 
-pub fn requestGithubIssue(issue: u32) !void {
+pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !void {
+    var ssl_tunnel = try SslTunnel.init(.{
+        .allocator = std.heap.c_allocator,
+        .pem = @embedFile("../discord-com-chain.pem"),
+        .host = "discord.com",
+    });
+    defer ssl_tunnel.deinit();
+
+    var buf: [0x1000]u8 = undefined;
+    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+
+    var path: [0x100]u8 = undefined;
+    try client.writeHead("POST", try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}));
+
+    try client.writeHeader("Host", "discord.com");
+    try client.writeHeader("User-Agent", agent);
+    try client.writeHeader("Accept", "application/json");
+    try client.writeHeader("Content-Type", "application/json");
+
+    var auth_buf: [0x100]u8 = undefined;
+    try client.writeHeader(
+        "Authorization",
+        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse @panic("How did we get here?")}),
+    );
+
+    var data_buf: [0x10000]u8 = undefined;
+    const data = try std.fmt.bufPrint(
+        &data_buf,
+        \\{{
+        \\  "content": "",
+        \\  "tts": false,
+        \\  "embed": {{
+        \\    "title": "Issue {0} -- {1}",
+        \\    "description": "https://github.com/ziglang/zig/issues/{0}"
+        \\  }}
+        \\}}
+    ,
+        .{ issue, message },
+    );
+    try client.writeHeader("Content-Length", try std.fmt.bufPrint(&auth_buf, "{}", .{data.len}));
+    try client.writeHeadComplete();
+
+    try client.writeChunk(data);
+    try ssl_tunnel.conn.flush();
+
+    if (try client.readEvent()) |event| {
+        if (event != .status) {
+            return error.MissingStatus;
+        }
+        switch (event.status.code) {
+            200 => {}, // success!
+            404 => return error.NotFound,
+            else => std.debug.panic("Response not expected: {}", .{event.status.code}),
+        }
+    } else {
+        return error.NoResponse;
+    }
+
+    while (try client.readEvent()) |_| {}
+}
+
+pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
     var ssl_tunnel = try SslTunnel.init(.{
         .allocator = std.heap.c_allocator,
         .pem = @embedFile("../github-com-chain.pem"),
@@ -107,10 +168,8 @@ pub fn requestGithubIssue(issue: u32) !void {
 
     while (try root.objectMatch("title")) |match| {
         var buffer: [0x1000]u8 = undefined;
-        std.debug.print("Issue: {} -- {}\n", .{
-            issue,
-            try match.value.stringBuffer(&buffer),
-        });
+        const title = try match.value.stringBuffer(&buffer);
+        try sendDiscordMessage(channel_id, issue, title);
         return;
     }
 
@@ -213,7 +272,7 @@ pub fn main() !void {
 
             if (issue != null and channel_id != null) {
                 std.debug.print("cid {} <- %%{}\n", .{ channel_id.?, issue.? });
-                try requestGithubIssue(issue.?);
+                try requestGithubIssue(channel_id.?, issue.?);
             }
         }
 
