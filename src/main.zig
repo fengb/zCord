@@ -181,22 +181,72 @@ pub fn main() !void {
     try discord_ws.run({}, struct {
         fn handleDispatch(ctx: void, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
-            if (!std.mem.eql(u8, name, "MESSAGE_CREATED")) return;
+            if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-            var channel_id = [_]u8{0} ** 32;
-            var issue_buffer = [_]u8{0} ** 10;
+            var issue: ?u32 = null;
+            var channel_id: ?u64 = null;
+
             while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
                 const swh = util.Swhash(16);
                 switch (swh.match(match.key)) {
                     swh.case("content") => {
-                        _ = try match.value.finalizeToken();
+                        var buf: [0x10000]u8 = undefined;
+                        issue = findIssue(try match.value.stringBuffer(&buf));
                     },
                     swh.case("channel_id") => {
-                        _ = try match.value.stringBuffer(&channel_id);
+                        var buf: [0x100]u8 = undefined;
+                        const channel_string = try match.value.stringBuffer(&buf);
+                        channel_id = try std.fmt.parseInt(u64, channel_string, 10);
                     },
                     else => unreachable,
                 }
             }
+
+            if (issue != null and channel_id != null) {
+                std.debug.print("cid {} <- %%{}\n", .{ channel_id.?, issue.? });
+            }
+        }
+
+        fn findIssue(string: []const u8) ?u32 {
+            const State = enum {
+                no_match,
+                percent,
+                ready,
+            };
+            var state = State.no_match;
+            var buffer: [0x100]u8 = undefined;
+            var tail: usize = 0;
+
+            for (string) |c| {
+                switch (state) {
+                    .no_match => {
+                        if (c == '%') {
+                            state = .percent;
+                        }
+                    },
+                    .percent => {
+                        state = if (c == '%') .ready else .no_match;
+                    },
+                    .ready => {
+                        if (c >= '0' and c <= '9') {
+                            buffer[tail] = c;
+                            tail += 1;
+                            continue;
+                        }
+
+                        if (std.mem.indexOfScalar(u8, " ,\n\t", c) != null) {
+                            if (std.fmt.parseInt(u32, buffer[0..tail], 10)) |val| {
+                                return val;
+                            } else |err| {}
+                        }
+
+                        state = .no_match;
+                        tail = 0;
+                    },
+                }
+            }
+
+            return std.fmt.parseInt(u32, buffer[0..tail], 10) catch null;
         }
     });
     std.debug.print("Terminus\n\n", .{});
