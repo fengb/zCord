@@ -178,27 +178,27 @@ pub fn main() !void {
         std.os.getenv("AUTH") orelse return error.AuthNotFound,
     );
 
-    if (false) {
-        while (try discord_ws.client.readDispatch()) |event| {
-            if (!std.mem.eql(u8, event.name, "MESSAGE_CREATED")) continue;
+    try discord_ws.run({}, struct {
+        fn handleDispatch(ctx: void, name: []const u8, data: anytype) !void {
+            std.debug.print(">> {}\n", .{name});
+            if (!std.mem.eql(u8, name, "MESSAGE_CREATED")) return;
 
             var channel_id = [_]u8{0} ** 32;
-            var issue = [_]u8{0} ** 10;
-            while (try event.element.objectMatch(&[_]u8{ "content", "channel_id" })) |match| {
-                switch (match.key) {
-                    "content" => {
-                        while (try match.element.stringByte()) |byte| {
-                            "%%std.fmt.print";
-                        }
+            var issue_buffer = [_]u8{0} ** 10;
+            while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
+                const swh = util.Swhash(16);
+                switch (swh.match(match.key)) {
+                    swh.case("content") => {
+                        _ = try match.value.finalizeToken();
                     },
-                    "channel_id" => match.element.stringBuffer(&channel_id),
+                    swh.case("channel_id") => {
+                        _ = try match.value.stringBuffer(&channel_id);
+                    },
+                    else => unreachable,
                 }
             }
         }
-    }
-    while (try discord_ws.client.readEvent()) |event| {
-        std.debug.print("{}\n\n", .{event});
-    }
+    });
     std.debug.print("Terminus\n\n", .{});
 }
 
@@ -277,9 +277,10 @@ const DiscordWs = struct {
         if (try result.client.readEvent()) |event| {
             std.debug.assert(event == .header);
         }
+
+        result.heartbeat_interval = 0;
         if (try result.client.readEvent()) |event| {
-            std.debug.print("{}\n", .{event.chunk.data});
-            result.heartbeat_interval = 0;
+            std.debug.assert(event == .chunk);
 
             var fba = std.io.fixedBufferStream(event.chunk.data);
             var stream = util.streamJson(fba.reader());
@@ -302,10 +303,10 @@ const DiscordWs = struct {
                     else => unreachable,
                 }
             }
+        }
 
-            if (result.heartbeat_interval == 0) {
-                return error.MalformedHelloResponse;
-            }
+        if (result.heartbeat_interval == 0) {
+            return error.MalformedHelloResponse;
         }
 
         // Identify
@@ -341,6 +342,53 @@ const DiscordWs = struct {
         self.client.close();
         self.* = undefined;
         self.allocator.destroy(self);
+    }
+
+    pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
+        while (try self.client.readEvent()) |event| {
+            if (event != .chunk) continue;
+
+            var name_buf: [32]u8 = undefined;
+            var name: ?[]u8 = null;
+            var op: ?Opcode = null;
+
+            var fba = std.io.fixedBufferStream(event.chunk.data);
+            var stream = util.streamJson(fba.reader());
+            const root = try stream.root();
+
+            while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
+                const swh = util.Swhash(2);
+                switch (swh.match(match.key)) {
+                    swh.case("t") => {
+                        name = try match.value.optionalStringBuffer(&name_buf);
+                    },
+                    swh.case("s") => {
+                        if (try match.value.optionalNumber(u32)) |seq| {
+                            self.heartbeat_seq = seq;
+                            std.debug.print("seq = {}\n", .{self.heartbeat_seq});
+                        }
+                    },
+                    swh.case("op") => {
+                        op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
+                    },
+                    swh.case("d") => {
+                        switch (op orelse return error.DataBeforeOp) {
+                            .dispatch => {
+                                try handler.handleDispatch(
+                                    ctx,
+                                    name orelse return error.DispatchWithoutName,
+                                    match.value,
+                                );
+                            },
+                            else => {
+                                _ = try match.value.finalizeToken();
+                            },
+                        }
+                    },
+                    else => unreachable,
+                }
+            }
+        }
     }
 
     pub fn printMessage(self: *DiscordWs, comptime fmt: []const u8, args: anytype) !void {
