@@ -67,7 +67,7 @@ pub fn requestGithubIssue(issue: u32) !void {
         .pem = @embedFile("../github-com-chain.pem"),
         .host = "api.github.com",
     });
-    errdefer ssl_tunnel.deinit();
+    defer ssl_tunnel.deinit();
 
     var buf: [0x1000]u8 = undefined;
     var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
@@ -102,10 +102,19 @@ pub fn requestGithubIssue(issue: u32) !void {
     }
 
     var reader = hzzpChunkReader(client);
-    var tmp: [0x1000]u8 = undefined;
-    while (try reader.reader().readUntilDelimiterOrEof(&tmp, ',')) |line| {
-        std.debug.print("{}\n", .{line});
+    var stream = util.streamJson(reader.reader());
+    const root = try stream.root();
+
+    while (try root.objectMatch("title")) |match| {
+        var buffer: [0x1000]u8 = undefined;
+        std.debug.print("Issue: {} -- {}\n", .{
+            issue,
+            try match.value.stringBuffer(&buffer),
+        });
+        return;
     }
+
+    return error.TitleNotFound;
 }
 
 fn hzzpChunkReader(client: anytype) HzzpChunkReader(@TypeOf(client)) {
@@ -204,6 +213,7 @@ pub fn main() !void {
 
             if (issue != null and channel_id != null) {
                 std.debug.print("cid {} <- %%{}\n", .{ channel_id.?, issue.? });
+                try requestGithubIssue(issue.?);
             }
         }
 
@@ -432,6 +442,7 @@ const DiscordWs = struct {
                             },
                             else => {
                                 _ = try match.value.finalizeToken();
+                                try stream.debugDump(std.io.getStdOut().writer());
                             },
                         }
                     },

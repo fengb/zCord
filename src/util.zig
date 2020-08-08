@@ -336,7 +336,7 @@ pub fn StreamJson(comptime Reader: type) type {
             }
         }
 
-        fn debugDump(ctx: Stream, writer: anytype) !void {
+        pub fn debugDump(ctx: Stream, writer: anytype) !void {
             var tmp = ctx._debug_buffer;
             const reader = tmp.reader();
 
