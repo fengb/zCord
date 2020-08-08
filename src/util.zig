@@ -1,11 +1,16 @@
 const std = @import("std");
 const std_json = @import("std-json.zig");
 
+const debug_buffer = std.builtin.mode == .Debug;
+
 pub fn streamJson(reader: anytype) StreamJson(@TypeOf(reader)) {
     return .{
         .reader = reader,
         .parser = std_json.StreamingParser.init(),
         ._root = null,
+        ._debug_buffer = if (debug_buffer)
+            std.fifo.LinearFifo(u8, .{ .Static = 0x100 }).init()
+        else {},
     };
 }
 
@@ -16,6 +21,10 @@ pub fn StreamJson(comptime Reader: type) type {
         reader: Reader,
         parser: std_json.StreamingParser,
         _root: ?Element,
+        _debug_buffer: if (debug_buffer)
+            std.fifo.LinearFifo(u8, .{ .Static = 0x100 })
+        else
+            void,
 
         const ElementType = union(enum) {
             Object: struct { stack_level: u8 },
@@ -42,17 +51,17 @@ pub fn StreamJson(comptime Reader: type) type {
                             switch (token) {
                                 .ArrayBegin => break :blk .{ .Array = .{ .stack_level = ctx.parser.stack_used } },
                                 .ObjectBegin => break :blk .{ .Object = .{ .stack_level = ctx.parser.stack_used } },
-                                else => std.debug.panic("Element unrecognized: {}", .{token}),
+                                else => ctx.assertFailure("Element unrecognized: {}", .{token}),
                             }
                         }
 
                         if (ctx.parser.state != start_state) {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
-                                .Number, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
+                                .Number, .NumberMaybeDotOrExponent, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
                                 .TrueLiteral1, .FalseLiteral1 => break :blk .Boolean,
                                 .NullLiteral1 => break :blk .Null,
-                                else => std.debug.panic("Element unrecognized: {}", .{ctx.parser.state}),
+                                else => ctx.assertFailure("Element unrecognized: {}", .{ctx.parser.state}),
                             }
                         }
                     }
@@ -216,7 +225,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                         // Skip over value
                         const value_element = try Element.init(self.ctx);
-                        _ = try self.finalizeToken();
+                        const tok = try value_element.finalizeToken();
                     }
                 }
             }
@@ -283,13 +292,17 @@ pub fn StreamJson(comptime Reader: type) type {
                                 if (self.ctx.parser.stack_used >= arr.stack_level) {
                                     continue;
                                 }
-                                std.debug.assert(token == .ArrayEnd);
+                                // Number followed by ArrayEnd generates two tokens at once
+                                // causing this assertion to be unreliable.
+                                // std.debug.assert(token == .ArrayEnd);
                             },
                             .Object => |obj| {
                                 if (self.ctx.parser.stack_used >= obj.stack_level) {
                                     continue;
                                 }
-                                std.debug.assert(token == .ObjectEnd);
+                                // Number followed by ObjectEnd generates two tokens at once
+                                // causing this assertion to be unreliable.
+                                // std.debug.assert(token == .ObjectEnd);
                             },
                         }
                         return token;
@@ -311,12 +324,38 @@ pub fn StreamJson(comptime Reader: type) type {
                     return;
                 }
             }
-            std.debug.panic("Unexpected state: {}", .{ctx.parser.state});
+            ctx.assertFailure("Unexpected state: {}", .{ctx.parser.state});
+        }
+
+        fn assertFailure(ctx: Stream, comptime fmt: []const u8, args: anytype) void {
+            if (debug_buffer) {
+                ctx.debugDump(std.io.getStdErr().writer()) catch {};
+            }
+            if (std.debug.runtime_safety) {
+                std.debug.panic(fmt, args);
+            }
+        }
+
+        fn debugDump(ctx: Stream, writer: anytype) !void {
+            var tmp = ctx._debug_buffer;
+            const reader = tmp.reader();
+
+            var buf: [0x100]u8 = undefined;
+            const size = try reader.read(&buf);
+            try writer.writeAll(buf[0..size]);
+            try writer.writeByte('\n');
         }
 
         // A simpler feed() to enable one liners.
         // token2 can only be close object/array and we don't need it
         fn feed(ctx: *Stream, byte: u8) !?std_json.Token {
+            if (debug_buffer) {
+                if (ctx._debug_buffer.writableLength() == 0) {
+                    ctx._debug_buffer.discard(1);
+                    std.debug.assert(ctx._debug_buffer.writableLength() == 1);
+                }
+                ctx._debug_buffer.writeAssumeCapacity(&[_]u8{byte});
+            }
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
             try ctx.parser.feed(byte, &token1, &token2);
