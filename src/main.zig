@@ -376,8 +376,7 @@ const DiscordWs = struct {
         errdefer allocator.destroy(result);
         result.allocator = allocator;
 
-        result.write_mutex = std.Mutex.init();
-        errdefer result.write_mutex.deinit();
+        result.write_mutex = .{};
 
         result.ssl_tunnel = try SslTunnel.init(.{
             .allocator = allocator,
