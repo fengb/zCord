@@ -474,6 +474,16 @@ const DiscordWs = struct {
 
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         while (try self.client.readEvent()) |event| {
+            // Skip over any remaining chunks. The processor didn't take care of it.
+            if (event != .header) continue;
+
+            self.processChunks(ctx, handler) catch |err| {
+                std.debug.print("{}\n", .{err});
+            };
+        }
+    }
+    pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
+        while (try self.client.readEvent()) |event| {
             if (event != .chunk) continue;
 
             var name_buf: [32]u8 = undefined;
