@@ -119,6 +119,12 @@ pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !voi
         return error.NoResponse;
     }
 
+    if (true) {
+        // Quit immediately because bearssl cleanup fails
+        std.debug.print("cid {} <- %%{}\n", .{ channel_id, issue });
+        std.os.exit(0);
+    }
+
     while (try client.readEvent()) |_| {}
 }
 
@@ -271,8 +277,12 @@ pub fn main() !void {
             }
 
             if (issue != null and channel_id != null) {
-                std.debug.print("cid {} <- %%{}\n", .{ channel_id.?, issue.? });
-                try requestGithubIssue(channel_id.?, issue.?);
+                const child_pid = try std.os.fork();
+                if (child_pid == 0) {
+                    try requestGithubIssue(channel_id.?, issue.?);
+                } else {
+                    // Not a child. Go back to listening.
+                }
             }
         }
 
@@ -501,7 +511,6 @@ const DiscordWs = struct {
                             },
                             else => {
                                 _ = try match.value.finalizeToken();
-                                try stream.debugDump(std.io.getStdOut().writer());
                             },
                         }
                     },
