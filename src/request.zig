@@ -110,14 +110,14 @@ pub const Https = struct {
 
     // TODO: fix this name
     pub fn printSend(self: *Https, comptime fmt: []const u8, args: anytype) !void {
-        var buf: [0x10000]u8 = undefined;
-        const data = try std.fmt.bufPrint(&buf, fmt, args);
-
-        var len_buf: [0x100]u8 = undefined;
-        try self.client.writeHeader("Content-Length", try std.fmt.bufPrint(&len_buf, "{}", .{data.len}));
+        var buf: [0x10]u8 = undefined;
+        try self.client.writeHeader(
+            "Content-Length",
+            try std.fmt.bufPrint(&buf, "{}", .{std.fmt.count(fmt, args)}),
+        );
         try self.client.writeHeadComplete();
 
-        try self.client.writeChunk(data);
+        try self.client.writer.print(fmt, args);
         try self.ssl_tunnel.conn.flush();
     }
 
