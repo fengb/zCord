@@ -106,7 +106,18 @@ pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !voi
     while (try client.readEvent()) |_| {}
 }
 
-pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
+fn Buffer(comptime max_len: usize) type {
+    return struct {
+        data: [max_len]u8,
+        len: usize,
+
+        fn slice(self: @This()) []const u8 {
+            return self.data[0..self.len];
+        }
+    };
+}
+
+pub fn requestGithubIssue(issue: u32) !Buffer(0x100) {
     var path: [0x100]u8 = undefined;
     var req = try request.Https.init(.{
         .allocator = std.heap.c_allocator,
@@ -115,7 +126,8 @@ pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
         .method = "GET",
         .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
     });
-    defer req.deinit();
+    // TODO: fix resource deinit
+    // defer req.deinit();
 
     try req.client.writeHeader("Accept", "application/json");
     try req.client.writeHeadComplete();
@@ -126,18 +138,17 @@ pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
     var stream = util.streamJson(body.reader());
     const root = try stream.root();
 
-    while (try root.objectMatch("title")) |match| {
-        var buffer: [0x1000]u8 = undefined;
-        const title = try match.value.stringBuffer(&buffer);
-        try sendDiscordMessage(channel_id, issue, title);
-        return;
+    if (try root.objectMatch("title")) |match| {
+        var buffer: Buffer(0x100) = undefined;
+        const slice = try match.value.stringBuffer(&buffer.data);
+        buffer.len = slice.len;
+        return buffer;
     }
 
     return error.TitleNotFound;
 }
 
 pub fn main() !void {
-    // try requestGithubIssue(5076);
     var discord_ws = try DiscordWs.init(
         std.heap.c_allocator,
         std.os.getenv("AUTH") orelse return error.AuthNotFound,
@@ -170,7 +181,8 @@ pub fn main() !void {
             if (issue != null and channel_id != null) {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
-                    try requestGithubIssue(channel_id.?, issue.?);
+                    const title = try requestGithubIssue(issue.?);
+                    try sendDiscordMessage(channel_id.?, issue.?, title.slice());
                 } else {
                     // Not a child. Go back to listening.
                 }
