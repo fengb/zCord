@@ -3,6 +3,7 @@ const hzzp = @import("hzzp");
 const wz = @import("wz");
 const ssl = @import("zig-bearssl");
 
+const request = @import("request.zig");
 const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
@@ -62,33 +63,26 @@ const SslTunnel = struct {
 };
 
 pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !void {
-    var ssl_tunnel = try SslTunnel.init(.{
+    var path: [0x100]u8 = undefined;
+    var req = try request.Https.init(.{
         .allocator = std.heap.c_allocator,
         .pem = @embedFile("../discord-com-chain.pem"),
         .host = "discord.com",
+        .method = "POST",
+        .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}),
     });
-    defer ssl_tunnel.deinit();
+    defer req.deinit();
 
-    var buf: [0x1000]u8 = undefined;
-    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
-
-    var path: [0x100]u8 = undefined;
-    try client.writeHead("POST", try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}));
-
-    try client.writeHeader("Host", "discord.com");
-    try client.writeHeader("User-Agent", agent);
-    try client.writeHeader("Accept", "application/json");
-    try client.writeHeader("Content-Type", "application/json");
+    try req.client.writeHeader("Accept", "application/json");
+    try req.client.writeHeader("Content-Type", "application/json");
 
     var auth_buf: [0x100]u8 = undefined;
-    try client.writeHeader(
+    try req.client.writeHeader(
         "Authorization",
         try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse @panic("How did we get here?")}),
     );
 
-    var data_buf: [0x10000]u8 = undefined;
-    const data = try std.fmt.bufPrint(
-        &data_buf,
+    try req.printSend(
         \\{{
         \\  "content": "",
         \\  "tts": false,
@@ -100,24 +94,8 @@ pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !voi
     ,
         .{ issue, message },
     );
-    try client.writeHeader("Content-Length", try std.fmt.bufPrint(&auth_buf, "{}", .{data.len}));
-    try client.writeHeadComplete();
 
-    try client.writeChunk(data);
-    try ssl_tunnel.conn.flush();
-
-    if (try client.readEvent()) |event| {
-        if (event != .status) {
-            return error.MissingStatus;
-        }
-        switch (event.status.code) {
-            200 => {}, // success!
-            404 => return error.NotFound,
-            else => std.debug.panic("Response not expected: {}", .{event.status.code}),
-        }
-    } else {
-        return error.NoResponse;
-    }
+    _ = try req.expectSuccessStatus();
 
     if (true) {
         // Quit immediately because bearssl cleanup fails
@@ -129,47 +107,23 @@ pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !voi
 }
 
 pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
-    var ssl_tunnel = try SslTunnel.init(.{
+    var path: [0x100]u8 = undefined;
+    var req = try request.Https.init(.{
         .allocator = std.heap.c_allocator,
         .pem = @embedFile("../github-com-chain.pem"),
         .host = "api.github.com",
+        .method = "GET",
+        .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
     });
-    defer ssl_tunnel.deinit();
+    defer req.deinit();
 
-    var buf: [0x1000]u8 = undefined;
-    var client = hzzp.BaseClient.create(&buf, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+    try req.client.writeHeader("Accept", "application/json");
+    try req.client.writeHeadComplete();
+    try req.ssl_tunnel.conn.flush();
 
-    var path: [0x100]u8 = undefined;
-    try client.writeHead("GET", try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}));
-
-    try client.writeHeader("Host", "api.github.com");
-    try client.writeHeader("User-Agent", agent);
-    try client.writeHeader("Accept", "application/json");
-    try client.writeHeadComplete();
-    try ssl_tunnel.conn.flush();
-
-    if (try client.readEvent()) |event| {
-        if (event != .status) {
-            return error.MissingStatus;
-        }
-        switch (event.status.code) {
-            200 => {}, // success!
-            404 => return error.NotFound,
-            else => @panic("Response not expected"),
-        }
-    } else {
-        return error.NoResponse;
-    }
-
-    // Skip headers
-    while (try client.readEvent()) |event| {
-        if (event == .head_complete) {
-            break;
-        }
-    }
-
-    var reader = hzzpChunkReader(client);
-    var stream = util.streamJson(reader.reader());
+    _ = try req.expectSuccessStatus();
+    var body = try req.body();
+    var stream = util.streamJson(body.reader());
     const root = try stream.root();
 
     while (try root.objectMatch("title")) |match| {
@@ -180,69 +134,6 @@ pub fn requestGithubIssue(channel_id: u64, issue: u32) !void {
     }
 
     return error.TitleNotFound;
-}
-
-fn hzzpChunkReader(client: anytype) HzzpChunkReader(@TypeOf(client)) {
-    return .{ .client = client };
-}
-
-fn HzzpChunkReader(comptime Client: type) type {
-    return struct {
-        const Self = @This();
-        const Reader = std.io.Reader(*Self, Client.ReadError, readFn);
-
-        client: Client,
-        complete: bool = false,
-        chunk: ?hzzp.BaseClient.Chunk = null,
-        loc: usize = undefined,
-
-        fn readFn(self: *Self, buffer: []u8) Client.ReadError!usize {
-            if (self.complete) return 0;
-
-            if (self.chunk) |chunk| {
-                const remaining = chunk.data[self.loc..];
-                if (buffer.len < remaining.len) {
-                    std.mem.copy(u8, buffer, remaining[0..buffer.len]);
-                    self.loc += buffer.len;
-                    return buffer.len;
-                } else {
-                    std.mem.copy(u8, buffer, remaining);
-                    if (chunk.final) {
-                        self.complete = true;
-                    }
-                    self.chunk = null;
-                    return remaining.len;
-                }
-            } else {
-                const event = (try self.client.readEvent()) orelse {
-                    self.complete = true;
-                    return 0;
-                };
-
-                if (event != .chunk) {
-                    self.complete = true;
-                    return 0;
-                }
-
-                if (buffer.len < event.chunk.data.len) {
-                    std.mem.copy(u8, buffer, event.chunk.data[0..buffer.len]);
-                    self.chunk = event.chunk;
-                    self.loc = buffer.len;
-                    return buffer.len;
-                } else {
-                    std.mem.copy(u8, buffer, event.chunk.data);
-                    if (event.chunk.final) {
-                        self.complete = true;
-                    }
-                    return event.chunk.data.len;
-                }
-            }
-        }
-
-        pub fn reader(self: *Self) Reader {
-            return .{ .context = self };
-        }
-    };
 }
 
 pub fn main() !void {
