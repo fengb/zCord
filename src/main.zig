@@ -8,60 +8,6 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-const SslTunnel = struct {
-    allocator: *std.mem.Allocator,
-
-    trust_anchor: ssl.TrustAnchorCollection,
-    x509: ssl.x509.Minimal,
-    client: ssl.Client,
-
-    raw_conn: std.fs.File,
-    raw_reader: std.fs.File.Reader,
-    raw_writer: std.fs.File.Writer,
-
-    conn: ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer),
-
-    fn init(args: struct {
-        allocator: *std.mem.Allocator,
-        pem: []const u8,
-        host: [:0]const u8,
-        port: u16 = 443,
-    }) !*SslTunnel {
-        const result = try args.allocator.create(SslTunnel);
-        errdefer args.allocator.destroy(result);
-
-        result.allocator = args.allocator;
-
-        result.trust_anchor = ssl.TrustAnchorCollection.init(args.allocator);
-        errdefer result.trust_anchor.deinit();
-        try result.trust_anchor.appendFromPEM(args.pem);
-
-        result.x509 = ssl.x509.Minimal.init(result.trust_anchor);
-        result.client = ssl.Client.init(result.x509.getEngine());
-        result.client.relocate();
-        try result.client.reset(args.host, false);
-
-        result.raw_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
-        errdefer result.raw_conn.close();
-
-        result.raw_reader = result.raw_conn.reader();
-        result.raw_writer = result.raw_conn.writer();
-
-        result.conn = ssl.initStream(result.client.getEngine(), &result.raw_reader, &result.raw_writer);
-
-        return result;
-    }
-
-    fn deinit(self: *SslTunnel) void {
-        self.conn.close() catch {};
-        self.raw_conn.close();
-        self.trust_anchor.deinit();
-
-        self.* = undefined;
-        self.allocator.destroy(self);
-    }
-};
-
 pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !void {
     var path: [0x100]u8 = undefined;
     var req = try request.Https.init(.{
@@ -134,7 +80,8 @@ pub fn requestGithubIssue(issue: u32) !Buffer(0x100) {
     try req.ssl_tunnel.conn.flush();
 
     _ = try req.expectSuccessStatus();
-    var body = try req.body();
+    try req.completeHeaders();
+    var body = req.body();
     var stream = util.streamJson(body.reader());
     const root = try stream.root();
 
@@ -237,17 +184,15 @@ pub fn main() !void {
 const DiscordWs = struct {
     allocator: *std.mem.Allocator,
 
-    ssl_tunnel: *SslTunnel,
+    ssl_tunnel: *request.SslTunnel,
 
-    client: wz.BaseClient.BaseClient(SslStream.DstInStream, SslStream.DstOutStream),
+    client: wz.BaseClient.BaseClient(request.SslTunnel.Stream.DstInStream, request.SslTunnel.Stream.DstOutStream),
     client_buffer: []u8,
     write_mutex: std.Mutex,
 
     heartbeat_interval: usize,
     heartbeat_seq: ?usize,
     heartbeat_thread: *std.Thread,
-
-    const SslStream = std.meta.fieldInfo(SslTunnel, "conn").field_type;
 
     const Opcode = enum {
         /// An event was dispatched.
@@ -281,7 +226,7 @@ const DiscordWs = struct {
 
         result.write_mutex = .{};
 
-        result.ssl_tunnel = try SslTunnel.init(.{
+        result.ssl_tunnel = try request.SslTunnel.init(.{
             .allocator = allocator,
             .pem = @embedFile("../discord-gg-chain.pem"),
             .host = "gateway.discord.gg",

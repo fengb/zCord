@@ -4,7 +4,7 @@ const ssl = @import("zig-bearssl");
 
 const bot_agent = "zigbot9001/0.0.1";
 
-const SslTunnel = struct {
+pub const SslTunnel = struct {
     allocator: *std.mem.Allocator,
 
     trust_anchor: ssl.TrustAnchorCollection,
@@ -17,9 +17,9 @@ const SslTunnel = struct {
 
     conn: Stream,
 
-    const Stream = ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer);
+    pub const Stream = ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer);
 
-    fn init(args: struct {
+    pub fn init(args: struct {
         allocator: *std.mem.Allocator,
         pem: []const u8,
         host: [:0]const u8,
@@ -50,7 +50,7 @@ const SslTunnel = struct {
         return result;
     }
 
-    fn deinit(self: *SslTunnel) void {
+    pub fn deinit(self: *SslTunnel) void {
         self.conn.close() catch {};
         self.raw_conn.close();
         self.trust_anchor.deinit();
@@ -144,41 +144,49 @@ pub const Https = struct {
         }
     }
 
-    pub fn body(self: *Https) !Body {
-        // TODO: maybe move into readFn
-        // Skip headers
+    pub fn completeHeaders(self: *Https) !void {
         while (try self.client.readEvent()) |event| {
             if (event == .head_complete) {
-                break;
+                return;
             }
         }
-
-        return Body{ .client = self.client };
     }
 
-    const Body = struct {
-        const Reader = std.io.Reader(*Body, HzzpClient.ReadError, readFn);
+    pub fn body(self: *Https) ChunkyReader(HzzpClient) {
+        return .{ .client = self.client };
+    }
+};
 
-        client: HzzpClient,
+pub fn ChunkyReader(comptime Chunker: type) type {
+    return struct {
+        const Self = @This();
+        const ReadEventInfo = blk: {
+            const ReturnType = @typeInfo(@TypeOf(Chunker.readEvent)).Fn.return_type.?;
+            break :blk @typeInfo(ReturnType).ErrorUnion;
+        };
+
+        const Reader = std.io.Reader(*Self, ReadEventInfo.error_set, readFn);
+
+        client: Chunker,
         complete: bool = false,
-        chunk: ?hzzp.BaseClient.Chunk = null,
+        event: ReadEventInfo.payload = null,
         loc: usize = undefined,
 
-        fn readFn(self: *Body, buffer: []u8) HzzpClient.ReadError!usize {
+        fn readFn(self: *Self, buffer: []u8) ReadEventInfo.error_set!usize {
             if (self.complete) return 0;
 
-            if (self.chunk) |chunk| {
-                const remaining = chunk.data[self.loc..];
+            if (self.event) |event| {
+                const remaining = event.chunk.data[self.loc..];
                 if (buffer.len < remaining.len) {
                     std.mem.copy(u8, buffer, remaining[0..buffer.len]);
                     self.loc += buffer.len;
                     return buffer.len;
                 } else {
                     std.mem.copy(u8, buffer, remaining);
-                    if (chunk.final) {
+                    if (event.chunk.final) {
                         self.complete = true;
                     }
-                    self.chunk = null;
+                    self.event = null;
                     return remaining.len;
                 }
             } else {
@@ -194,7 +202,7 @@ pub const Https = struct {
 
                 if (buffer.len < event.chunk.data.len) {
                     std.mem.copy(u8, buffer, event.chunk.data[0..buffer.len]);
-                    self.chunk = event.chunk;
+                    self.event = event;
                     self.loc = buffer.len;
                     return buffer.len;
                 } else {
@@ -207,8 +215,8 @@ pub const Https = struct {
             }
         }
 
-        pub fn reader(self: *Body) Reader {
+        pub fn reader(self: *Self) Reader {
             return .{ .context = self };
         }
     };
-};
+}
