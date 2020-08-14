@@ -8,45 +8,6 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-pub fn sendDiscordMessage(allocator: *std.mem.Allocator, auth_token: []const u8, channel_id: u64, issue: u32, message: []const u8) !void {
-    var path: [0x100]u8 = undefined;
-    var req = try request.Https.init(.{
-        .allocator = allocator,
-        .pem = @embedFile("../discord-com-chain.pem"),
-        .host = "discord.com",
-        .method = "POST",
-        .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}),
-    });
-    defer req.deinit();
-
-    try req.client.writeHeader("Accept", "application/json");
-    try req.client.writeHeader("Content-Type", "application/json");
-    try req.client.writeHeader("Authorization", auth_token);
-
-    try req.printSend(
-        \\{{
-        \\  "content": "",
-        \\  "tts": false,
-        \\  "embed": {{
-        \\    "title": "Issue {0} -- {1}",
-        \\    "description": "https://github.com/ziglang/zig/issues/{0}"
-        \\  }}
-        \\}}
-    ,
-        .{ issue, message },
-    );
-
-    _ = try req.expectSuccessStatus();
-
-    if (true) {
-        // Quit immediately because bearssl cleanup fails
-        std.debug.print("cid {} <- %%{}\n", .{ channel_id, issue });
-        std.os.exit(0);
-    }
-
-    while (try client.readEvent()) |_| {}
-}
-
 fn Buffer(comptime max_len: usize) type {
     return struct {
         data: [max_len]u8,
@@ -58,43 +19,87 @@ fn Buffer(comptime max_len: usize) type {
     };
 }
 
-pub fn requestGithubIssue(allocator: *std.mem.Allocator, issue: u32) !Buffer(0x100) {
-    var path: [0x100]u8 = undefined;
-    var req = try request.Https.init(.{
-        .allocator = allocator,
-        .pem = @embedFile("../github-com-chain.pem"),
-        .host = "api.github.com",
-        .method = "GET",
-        .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
-    });
-    // TODO: fix resource deinit
-    // defer req.deinit();
+const Context = struct {
+    allocator: *std.mem.Allocator,
+    auth_token: []const u8,
 
-    try req.client.writeHeader("Accept", "application/json");
-    try req.client.writeHeadComplete();
-    try req.ssl_tunnel.conn.flush();
+    pub fn sendDiscordMessage(self: Context, channel_id: u64, issue: u32, message: []const u8) !void {
+        var path: [0x100]u8 = undefined;
+        var req = try request.Https.init(.{
+            .allocator = self.allocator,
+            .pem = @embedFile("../discord-com-chain.pem"),
+            .host = "discord.com",
+            .method = "POST",
+            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}),
+        });
+        defer req.deinit();
 
-    _ = try req.expectSuccessStatus();
-    try req.completeHeaders();
-    var body = req.body();
-    var stream = util.streamJson(body.reader());
-    const root = try stream.root();
+        try req.client.writeHeader("Accept", "application/json");
+        try req.client.writeHeader("Content-Type", "application/json");
+        try req.client.writeHeader("Authorization", self.auth_token);
 
-    if (try root.objectMatch("title")) |match| {
-        var buffer: Buffer(0x100) = undefined;
-        const slice = try match.value.stringBuffer(&buffer.data);
-        buffer.len = slice.len;
-        return buffer;
+        try req.printSend(
+            \\{{
+            \\  "content": "",
+            \\  "tts": false,
+            \\  "embed": {{
+            \\    "title": "Issue {0} -- {1}",
+            \\    "description": "https://github.com/ziglang/zig/issues/{0}"
+            \\  }}
+            \\}}
+        ,
+            .{ issue, message },
+        );
+
+        _ = try req.expectSuccessStatus();
+
+        if (true) {
+            // Quit immediately because bearssl cleanup fails
+            std.debug.print("cid {} <- %%{}\n", .{ channel_id, issue });
+            std.os.exit(0);
+        }
+
+        while (try client.readEvent()) |_| {}
     }
 
-    return error.TitleNotFound;
-}
+    pub fn requestGithubIssue(self: Context, issue: u32) !Buffer(0x100) {
+        var path: [0x100]u8 = undefined;
+        var req = try request.Https.init(.{
+            .allocator = self.allocator,
+            .pem = @embedFile("../github-com-chain.pem"),
+            .host = "api.github.com",
+            .method = "GET",
+            .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
+        });
+        // TODO: fix resource deinit
+        // defer req.deinit();
+
+        try req.client.writeHeader("Accept", "application/json");
+        try req.client.writeHeadComplete();
+        try req.ssl_tunnel.conn.flush();
+
+        _ = try req.expectSuccessStatus();
+        try req.completeHeaders();
+        var body = req.body();
+        var stream = util.streamJson(body.reader());
+        const root = try stream.root();
+
+        if (try root.objectMatch("title")) |match| {
+            var buffer: Buffer(0x100) = undefined;
+            const slice = try match.value.stringBuffer(&buffer.data);
+            buffer.len = slice.len;
+            return buffer;
+        }
+
+        return error.TitleNotFound;
+    }
+};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var auth_buf: [0x100]u8 = undefined;
-    const context = .{
+    const context = Context{
         .allocator = &gpa.allocator,
         .auth_token = try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
     };
@@ -105,7 +110,7 @@ pub fn main() !void {
     );
 
     try discord_ws.run(context, struct {
-        fn handleDispatch(ctx: anytype, name: []const u8, data: anytype) !void {
+        fn handleDispatch(ctx: Context, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
@@ -131,8 +136,8 @@ pub fn main() !void {
             if (issue != null and channel_id != null) {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
-                    const title = try requestGithubIssue(ctx.allocator, issue.?);
-                    try sendDiscordMessage(ctx.allocator, ctx.auth_token, channel_id.?, issue.?, title.slice());
+                    const title = try ctx.requestGithubIssue(issue.?);
+                    try ctx.sendDiscordMessage(channel_id.?, issue.?, title.slice());
                 } else {
                     // Not a child. Go back to listening.
                 }
