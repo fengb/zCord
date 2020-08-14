@@ -200,18 +200,9 @@ pub fn ChunkyReader(comptime Chunker: type) type {
                     return 0;
                 }
 
-                if (buffer.len < event.chunk.data.len) {
-                    std.mem.copy(u8, buffer, event.chunk.data[0..buffer.len]);
-                    self.event = event;
-                    self.loc = buffer.len;
-                    return buffer.len;
-                } else {
-                    std.mem.copy(u8, buffer, event.chunk.data);
-                    if (event.chunk.final) {
-                        self.complete = true;
-                    }
-                    return event.chunk.data.len;
-                }
+                self.event = event;
+                self.loc = 0;
+                return self.readFn(buffer);
             }
         }
 
