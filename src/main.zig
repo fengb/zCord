@@ -8,10 +8,10 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-pub fn sendDiscordMessage(channel_id: u64, issue: u32, message: []const u8) !void {
+pub fn sendDiscordMessage(allocator: *std.mem.Allocator, channel_id: u64, issue: u32, message: []const u8) !void {
     var path: [0x100]u8 = undefined;
     var req = try request.Https.init(.{
-        .allocator = std.heap.c_allocator,
+        .allocator = allocator,
         .pem = @embedFile("../discord-com-chain.pem"),
         .host = "discord.com",
         .method = "POST",
@@ -63,10 +63,10 @@ fn Buffer(comptime max_len: usize) type {
     };
 }
 
-pub fn requestGithubIssue(issue: u32) !Buffer(0x100) {
+pub fn requestGithubIssue(allocator: *std.mem.Allocator, issue: u32) !Buffer(0x100) {
     var path: [0x100]u8 = undefined;
     var req = try request.Https.init(.{
-        .allocator = std.heap.c_allocator,
+        .allocator = allocator,
         .pem = @embedFile("../github-com-chain.pem"),
         .host = "api.github.com",
         .method = "GET",
@@ -96,13 +96,19 @@ pub fn requestGithubIssue(issue: u32) !Buffer(0x100) {
 }
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+    const context = .{
+        .allocator = &gpa.allocator,
+    };
+
     var discord_ws = try DiscordWs.init(
-        std.heap.c_allocator,
+        context.allocator,
         std.os.getenv("AUTH") orelse return error.AuthNotFound,
     );
 
-    try discord_ws.run({}, struct {
-        fn handleDispatch(ctx: void, name: []const u8, data: anytype) !void {
+    try discord_ws.run(context, struct {
+        fn handleDispatch(ctx: anytype, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
@@ -128,8 +134,8 @@ pub fn main() !void {
             if (issue != null and channel_id != null) {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
-                    const title = try requestGithubIssue(issue.?);
-                    try sendDiscordMessage(channel_id.?, issue.?, title.slice());
+                    const title = try requestGithubIssue(ctx.allocator, issue.?);
+                    try sendDiscordMessage(ctx.allocator, channel_id.?, issue.?, title.slice());
                 } else {
                     // Not a child. Go back to listening.
                 }
