@@ -138,7 +138,7 @@ pub fn main() !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-            var issue: ?u32 = null;
+            var ask: Buffer(0x100) = .{};
             var channel_id: ?u64 = null;
 
             while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
@@ -146,7 +146,7 @@ pub fn main() !void {
                 switch (swh.match(match.key)) {
                     swh.case("content") => {
                         var buf: [0x10000]u8 = undefined;
-                        issue = findIssue(try match.value.stringBuffer(&buf));
+                        ask = findAsk(try match.value.stringBuffer(&buf));
                     },
                     swh.case("channel_id") => {
                         var buf: [0x100]u8 = undefined;
@@ -157,26 +157,29 @@ pub fn main() !void {
                 }
             }
 
-            if (issue != null and channel_id != null) {
+            if (ask.len > 0 and channel_id != null) {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
-                    const gh_issue = try ctx.requestGithubIssue(issue.?);
-                    try ctx.sendDiscordMessage(channel_id.?, gh_issue);
+                    if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
+                        const gh_issue = try ctx.requestGithubIssue(issue);
+                        try ctx.sendDiscordMessage(channel_id.?, gh_issue);
+                    } else |err| {
+                        std.debug.print("{}\n", .{ask.slice()});
+                    }
                 } else {
                     // Not a child. Go back to listening.
                 }
             }
         }
 
-        fn findIssue(string: []const u8) ?u32 {
+        fn findAsk(string: []const u8) Buffer(0x100) {
             const State = enum {
                 no_match,
                 percent,
                 ready,
             };
             var state = State.no_match;
-            var buffer: [0x100]u8 = undefined;
-            var tail: usize = 0;
+            var buffer: Buffer(0x100) = .{};
 
             for (string) |c| {
                 switch (state) {
@@ -189,25 +192,18 @@ pub fn main() !void {
                         state = if (c == '%') .ready else .no_match;
                     },
                     .ready => {
-                        if (c >= '0' and c <= '9') {
-                            buffer[tail] = c;
-                            tail += 1;
-                            continue;
+                        switch (c) {
+                            ' ', ',', '\n', '\t' => return buffer,
+                            else => {
+                                buffer.data[buffer.len] = c;
+                                buffer.len += 1;
+                            },
                         }
-
-                        if (std.mem.indexOfScalar(u8, " ,\n\t", c) != null) {
-                            if (std.fmt.parseInt(u32, buffer[0..tail], 10)) |val| {
-                                return val;
-                            } else |err| {}
-                        }
-
-                        state = .no_match;
-                        tail = 0;
                     },
                 }
             }
 
-            return std.fmt.parseInt(u32, buffer[0..tail], 10) catch null;
+            return buffer;
         }
     });
     std.debug.print("Terminus\n\n", .{});
