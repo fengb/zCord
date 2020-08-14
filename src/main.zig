@@ -10,8 +10,8 @@ const agent = "zigbot9001/0.0.1";
 
 fn Buffer(comptime max_len: usize) type {
     return struct {
-        data: [max_len]u8,
-        len: usize,
+        data: [max_len]u8 = undefined,
+        len: usize = 0,
 
         fn slice(self: @This()) []const u8 {
             return self.data[0..self.len];
@@ -23,7 +23,7 @@ const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
 
-    pub fn sendDiscordMessage(self: Context, channel_id: u64, issue: u32, message: []const u8) !void {
+    pub fn sendDiscordMessage(self: Context, channel_id: u64, issue: GithubIssue) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
@@ -38,17 +38,27 @@ const Context = struct {
         try req.client.writeHeader("Content-Type", "application/json");
         try req.client.writeHeader("Authorization", self.auth_token);
 
+        const label = if (std.mem.indexOf(u8, issue.url.slice(), "/pull/")) |_|
+            "Pull"
+        else
+            "Issue";
+
         try req.printSend(
             \\{{
             \\  "content": "",
             \\  "tts": false,
             \\  "embed": {{
-            \\    "title": "Issue {0} -- {1}",
-            \\    "description": "https://github.com/ziglang/zig/issues/{0}"
+            \\    "title": "{0} #{1} — {2}",
+            \\    "description": "{3}"
             \\  }}
             \\}}
         ,
-            .{ issue, message },
+            .{
+                label,
+                issue.number,
+                issue.title.slice(),
+                issue.url.slice(),
+            },
         );
 
         _ = try req.expectSuccessStatus();
@@ -62,7 +72,8 @@ const Context = struct {
         while (try client.readEvent()) |_| {}
     }
 
-    pub fn requestGithubIssue(self: Context, issue: u32) !Buffer(0x100) {
+    const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
+    pub fn requestGithubIssue(self: Context, issue: u32) !GithubIssue {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
@@ -84,14 +95,27 @@ const Context = struct {
         var stream = util.streamJson(body.reader());
         const root = try stream.root();
 
-        if (try root.objectMatch("title")) |match| {
-            var buffer: Buffer(0x100) = undefined;
-            const slice = try match.value.stringBuffer(&buffer.data);
-            buffer.len = slice.len;
-            return buffer;
+        var result = GithubIssue{ .number = issue, .title = .{}, .url = .{} };
+        while (try root.objectMatchAny(&[_][]const u8{ "title", "html_url" })) |match| {
+            const swh = util.Swhash(16);
+            switch (swh.match(match.key)) {
+                swh.case("html_url") => {
+                    const slice = try match.value.stringBuffer(&result.url.data);
+                    result.url.len = slice.len;
+                },
+                swh.case("title") => {
+                    const slice = try match.value.stringBuffer(&result.title.data);
+                    result.title.len = slice.len;
+                },
+                else => unreachable,
+            }
+
+            if (result.title.len > 0 and result.url.len > 0) {
+                return result;
+            }
         }
 
-        return error.TitleNotFound;
+        return error.FieldNotFound;
     }
 };
 
@@ -136,8 +160,8 @@ pub fn main() !void {
             if (issue != null and channel_id != null) {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
-                    const title = try ctx.requestGithubIssue(issue.?);
-                    try ctx.sendDiscordMessage(channel_id.?, issue.?, title.slice());
+                    const gh_issue = try ctx.requestGithubIssue(issue.?);
+                    try ctx.sendDiscordMessage(channel_id.?, gh_issue);
                 } else {
                     // Not a child. Go back to listening.
                 }
