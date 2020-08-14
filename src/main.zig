@@ -8,7 +8,7 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-pub fn sendDiscordMessage(allocator: *std.mem.Allocator, channel_id: u64, issue: u32, message: []const u8) !void {
+pub fn sendDiscordMessage(allocator: *std.mem.Allocator, auth_token: []const u8, channel_id: u64, issue: u32, message: []const u8) !void {
     var path: [0x100]u8 = undefined;
     var req = try request.Https.init(.{
         .allocator = allocator,
@@ -21,12 +21,7 @@ pub fn sendDiscordMessage(allocator: *std.mem.Allocator, channel_id: u64, issue:
 
     try req.client.writeHeader("Accept", "application/json");
     try req.client.writeHeader("Content-Type", "application/json");
-
-    var auth_buf: [0x100]u8 = undefined;
-    try req.client.writeHeader(
-        "Authorization",
-        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse @panic("How did we get here?")}),
-    );
+    try req.client.writeHeader("Authorization", auth_token);
 
     try req.printSend(
         \\{{
@@ -98,13 +93,15 @@ pub fn requestGithubIssue(allocator: *std.mem.Allocator, issue: u32) !Buffer(0x1
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
+    var auth_buf: [0x100]u8 = undefined;
     const context = .{
         .allocator = &gpa.allocator,
+        .auth_token = try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
     };
 
     var discord_ws = try DiscordWs.init(
         context.allocator,
-        std.os.getenv("AUTH") orelse return error.AuthNotFound,
+        context.auth_token,
     );
 
     try discord_ws.run(context, struct {
@@ -135,7 +132,7 @@ pub fn main() !void {
                 const child_pid = try std.os.fork();
                 if (child_pid == 0) {
                     const title = try requestGithubIssue(ctx.allocator, issue.?);
-                    try sendDiscordMessage(ctx.allocator, channel_id.?, issue.?, title.slice());
+                    try sendDiscordMessage(ctx.allocator, ctx.auth_token, channel_id.?, issue.?, title.slice());
                 } else {
                     // Not a child. Go back to listening.
                 }
@@ -297,7 +294,7 @@ const DiscordWs = struct {
             \\   "op": 2,
             \\   "d": {{
             \\     "compress": "false",
-            \\     "token": "Bot {0}",
+            \\     "token": "{0}",
             \\     "properties": {{
             \\       "$os": "{1}",
             \\       "$browser": "{2}",
