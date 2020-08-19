@@ -23,17 +23,32 @@ fn Buffer(comptime max_len: usize) type {
 const Escape = struct {
     text: []const u8,
 
+    const Reserved = enum(u8) {
+        Quote = '"',
+        Newline = '\n',
+        Backslash = '\\',
+    };
+
     pub fn wrap(text: []const u8) Escape {
         return .{ .text = text };
     }
 
     pub fn format(self: Escape, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
-        for (self.text) |letter| {
-            switch (letter) {
-                '"' => try out_stream.writeAll("\\\""),
-                '\n' => try out_stream.writeAll("\\n"),
-                else => try out_stream.writeByte(letter),
+        var start: usize = 0;
+        for (self.text) |letter, i| {
+            const reserved = std.meta.intToEnum(Reserved, letter) catch continue;
+            if (start < i) {
+                try out_stream.writeAll(self.text[start..i]);
             }
+            switch (reserved) {
+                .Quote => try out_stream.writeAll("\\\""),
+                .Newline => try out_stream.writeAll("\\n"),
+                .Backslash => try out_stream.writeAll("\\\\"),
+            }
+            start = i + 1;
+        }
+        if (start < self.text.len) {
+            try out_stream.writeAll(self.text[start..]);
         }
     }
 };
@@ -169,7 +184,7 @@ const Context = struct {
             \\  }}
             \\}}
         ,
-            .{ title, Escape.wrap(body) },
+            .{ Escape.wrap(title), Escape.wrap(body) },
         );
 
         _ = try req.expectSuccessStatus();
@@ -422,7 +437,7 @@ const DiscordWs = struct {
             \\ }}
         ,
             .{
-                auth_token,
+                Escape.wrap(auth_token),
                 @tagName(std.Target.current.os.tag),
                 agent,
             },
