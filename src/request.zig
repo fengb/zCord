@@ -11,9 +11,9 @@ pub const SslTunnel = struct {
     x509: ssl.x509.Minimal,
     client: ssl.Client,
 
-    raw_conn: std.fs.File,
-    raw_reader: std.fs.File.Reader,
-    raw_writer: std.fs.File.Writer,
+    tcp_conn: std.fs.File,
+    tcp_reader: std.fs.File.Reader,
+    tcp_writer: std.fs.File.Writer,
 
     conn: Stream,
 
@@ -39,23 +39,21 @@ pub const SslTunnel = struct {
         result.client.relocate();
         try result.client.reset(args.host, false);
 
-        result.raw_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
-        errdefer result.raw_conn.close();
+        result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
+        errdefer result.tcp_conn.close();
 
-        result.raw_reader = result.raw_conn.reader();
-        result.raw_writer = result.raw_conn.writer();
+        result.tcp_reader = result.tcp_conn.reader();
+        result.tcp_writer = result.tcp_conn.writer();
 
-        result.conn = ssl.initStream(result.client.getEngine(), &result.raw_reader, &result.raw_writer);
+        result.conn = ssl.initStream(result.client.getEngine(), &result.tcp_reader, &result.tcp_writer);
 
         return result;
     }
 
     pub fn deinit(self: *SslTunnel) void {
-        self.conn.close() catch {};
-        self.raw_conn.close();
+        self.tcp_conn.close();
         self.trust_anchor.deinit();
 
-        self.* = undefined;
         self.allocator.destroy(self);
     }
 };

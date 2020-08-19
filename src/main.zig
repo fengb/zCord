@@ -54,13 +54,6 @@ const Context = struct {
         );
 
         _ = try req.expectSuccessStatus();
-
-        if (true) {
-            // Quit immediately because bearssl cleanup fails
-            std.os.exit(0);
-        }
-
-        while (try client.readEvent()) |_| {}
     }
 
     const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
@@ -73,8 +66,7 @@ const Context = struct {
             .method = "GET",
             .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
         });
-        // TODO: fix resource deinit
-        // defer req.deinit();
+        defer req.deinit();
 
         try req.client.writeHeader("Accept", "application/json");
         try req.client.writeHeadComplete();
@@ -150,28 +142,23 @@ pub fn main() !void {
             }
 
             if (ask.len > 0 and channel_id != null) {
-                const child_pid = try std.os.fork();
-                if (child_pid == 0) {
-                    if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
-                        const gh_issue = try ctx.requestGithubIssue(issue);
-                        var buf: [0x1000]u8 = undefined;
+                if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
+                    const gh_issue = try ctx.requestGithubIssue(issue);
+                    var buf: [0x1000]u8 = undefined;
 
-                        const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
-                            "Pull"
-                        else
-                            "Issue";
-                        const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
-                        try ctx.sendDiscordMessage(channel_id.?, title, gh_issue.url.slice());
-                    } else |_| {
-                        var arena = std.heap.ArenaAllocator.init(ctx.allocator);
-                        defer arena.deinit();
+                    const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
+                        "Pull"
+                    else
+                        "Issue";
+                    const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
+                    try ctx.sendDiscordMessage(channel_id.?, title, gh_issue.url.slice());
+                } else |_| {
+                    var arena = std.heap.ArenaAllocator.init(ctx.allocator);
+                    defer arena.deinit();
 
-                        if (try analBuddy.analyse(&arena, &ctx.prepared_anal, ask.slice())) |match| {
-                            try ctx.sendDiscordMessage(channel_id.?, ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
-                        }
+                    if (try analBuddy.analyse(&arena, &ctx.prepared_anal, ask.slice())) |match| {
+                        try ctx.sendDiscordMessage(channel_id.?, ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
                     }
-                } else {
-                    // Not a child. Go back to listening.
                 }
             }
         }
