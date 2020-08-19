@@ -47,7 +47,7 @@ const Context = struct {
         return result;
     }
 
-    pub fn makeAskRequest(self: *Context, ask: Buffer(0x100), channel_id: u64) void {
+    pub fn makeAskRequest(self: *Context, channel_id: u64, ask: Buffer(0x100)) void {
         self.ask_mailbox = .{ .ask = ask, .channel_id = channel_id };
 
         // Either poke the free mutex, or immediately release a locked one
@@ -55,28 +55,35 @@ const Context = struct {
         lock.release();
     }
 
-    pub fn askHandler(self: *Context) !void {
+    pub fn askHandler(self: *Context) void {
         while (true) {
             _ = self.ask_mutex.acquire();
 
-            const mailbox = self.ask_mailbox;
-            if (std.fmt.parseInt(u32, mailbox.ask.slice(), 10)) |issue| {
-                const gh_issue = try self.requestGithubIssue(issue);
-                var buf: [0x1000]u8 = undefined;
+            // Explicitly copy this data to prevent concurrent alias bugs
+            // TODO: add a mutex?
+            var mailbox = self.ask_mailbox;
+            self.askOne(mailbox.channel_id, mailbox.ask.slice()) catch |err| {
+                std.debug.print("{}\n", .{err});
+            };
+        }
+    }
 
-                const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
-                    "Pull"
-                else
-                    "Issue";
-                const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
-                try self.sendDiscordMessage(mailbox.channel_id, title, gh_issue.url.slice());
-            } else |_| {
-                var arena = std.heap.ArenaAllocator.init(self.allocator);
-                defer arena.deinit();
+    pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
+        if (std.fmt.parseInt(u32, ask, 10)) |issue| {
+            const gh_issue = try self.requestGithubIssue(issue);
 
-                if (try analBuddy.analyse(&arena, &self.prepared_anal, mailbox.ask.slice())) |match| {
-                    try self.sendDiscordMessage(mailbox.channel_id, mailbox.ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
-                }
+            const is_pull_request = std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/") != null;
+            const label = if (is_pull_request) "Pull" else "Issue";
+
+            var buf: [0x1000]u8 = undefined;
+            const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
+            try self.sendDiscordMessage(channel_id, title, gh_issue.url.slice());
+        } else |_| {
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+
+            if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
+                try self.sendDiscordMessage(channel_id, ask, std.mem.trim(u8, match, " \t\r\n"));
             }
         }
     }
@@ -198,7 +205,7 @@ pub fn main() !void {
             }
 
             if (ask.len > 0 and channel_id != null) {
-                ctx.makeAskRequest(ask, channel_id.?);
+                ctx.makeAskRequest(channel_id.?, ask);
             }
         }
 
