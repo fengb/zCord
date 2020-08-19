@@ -25,6 +25,62 @@ const Context = struct {
     auth_token: []const u8,
     prepared_anal: analBuddy.PrepareResult,
 
+    ask_mailbox: struct { ask: Buffer(0x100), channel_id: u64 },
+    ask_mutex: std.Mutex,
+    ask_thread: *std.Thread,
+
+    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8) !*Context {
+        const result = try allocator.create(Context);
+        errdefer allocator.destroy(result);
+
+        result.allocator = allocator;
+        result.auth_token = auth_token;
+        result.prepared_anal = try analBuddy.prepare(allocator, ziglib);
+        errdefer analBuddy.dispose(&result.prepared_anal);
+
+        result.ask_mailbox = undefined;
+        result.ask_mutex = .{};
+        // Manually lock this so the thread is blocked
+        _ = result.ask_mutex.acquire();
+        result.ask_thread = try std.Thread.spawn(result, askHandler);
+
+        return result;
+    }
+
+    pub fn makeAskRequest(self: *Context, ask: Buffer(0x100), channel_id: u64) void {
+        self.ask_mailbox = .{ .ask = ask, .channel_id = channel_id };
+
+        // Either poke the free mutex, or immediately release a locked one
+        const lock = self.ask_mutex.tryAcquire() orelse std.Mutex.Held{ .mutex = &self.ask_mutex };
+        lock.release();
+    }
+
+    pub fn askHandler(self: *Context) !void {
+        while (true) {
+            _ = self.ask_mutex.acquire();
+
+            const mailbox = self.ask_mailbox;
+            if (std.fmt.parseInt(u32, mailbox.ask.slice(), 10)) |issue| {
+                const gh_issue = try self.requestGithubIssue(issue);
+                var buf: [0x1000]u8 = undefined;
+
+                const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
+                    "Pull"
+                else
+                    "Issue";
+                const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
+                try self.sendDiscordMessage(mailbox.channel_id, title, gh_issue.url.slice());
+            } else |_| {
+                var arena = std.heap.ArenaAllocator.init(self.allocator);
+                defer arena.deinit();
+
+                if (try analBuddy.analyse(&arena, &self.prepared_anal, mailbox.ask.slice())) |match| {
+                    try self.sendDiscordMessage(mailbox.channel_id, mailbox.ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
+                }
+            }
+        }
+    }
+
     pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, url: []const u8) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
@@ -106,18 +162,18 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var auth_buf: [0x100]u8 = undefined;
-    var context = Context{
-        .allocator = &gpa.allocator,
-        .auth_token = try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
-        .prepared_anal = try analBuddy.prepare(&gpa.allocator, std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound),
-    };
+    const context = try Context.init(
+        &gpa.allocator,
+        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
+        std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound,
+    );
 
     var discord_ws = try DiscordWs.init(
         context.allocator,
         context.auth_token,
     );
 
-    try discord_ws.run(&context, struct {
+    try discord_ws.run(context, struct {
         fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
@@ -142,24 +198,7 @@ pub fn main() !void {
             }
 
             if (ask.len > 0 and channel_id != null) {
-                if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
-                    const gh_issue = try ctx.requestGithubIssue(issue);
-                    var buf: [0x1000]u8 = undefined;
-
-                    const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
-                        "Pull"
-                    else
-                        "Issue";
-                    const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
-                    try ctx.sendDiscordMessage(channel_id.?, title, gh_issue.url.slice());
-                } else |_| {
-                    var arena = std.heap.ArenaAllocator.init(ctx.allocator);
-                    defer arena.deinit();
-
-                    if (try analBuddy.analyse(&arena, &ctx.prepared_anal, ask.slice())) |match| {
-                        try ctx.sendDiscordMessage(channel_id.?, ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
-                    }
-                }
+                ctx.makeAskRequest(ask, channel_id.?);
             }
         }
 
