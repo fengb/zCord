@@ -25,7 +25,7 @@ const Context = struct {
     auth_token: []const u8,
     prepared_anal: analBuddy.PrepareResult,
 
-    pub fn sendDiscordMessage(self: Context, channel_id: u64, issue: GithubIssue) !void {
+    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, url: []const u8) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
@@ -40,34 +40,23 @@ const Context = struct {
         try req.client.writeHeader("Content-Type", "application/json");
         try req.client.writeHeader("Authorization", self.auth_token);
 
-        const label = if (std.mem.indexOf(u8, issue.url.slice(), "/pull/")) |_|
-            "Pull"
-        else
-            "Issue";
-
         try req.printSend(
             \\{{
             \\  "content": "",
             \\  "tts": false,
             \\  "embed": {{
-            \\    "title": "{0} #{1} — {2}",
-            \\    "description": "{3}"
+            \\    "title": "{0}",
+            \\    "description": "{1}"
             \\  }}
             \\}}
         ,
-            .{
-                label,
-                issue.number,
-                issue.title.slice(),
-                issue.url.slice(),
-            },
+            .{ title, url },
         );
 
         _ = try req.expectSuccessStatus();
 
         if (true) {
             // Quit immediately because bearssl cleanup fails
-            std.debug.print("cid {} <- %%{}\n", .{ channel_id, issue });
             std.os.exit(0);
         }
 
@@ -165,15 +154,20 @@ pub fn main() !void {
                 if (child_pid == 0) {
                     if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
                         const gh_issue = try ctx.requestGithubIssue(issue);
-                        try ctx.sendDiscordMessage(channel_id.?, gh_issue);
+                        var buf: [0x1000]u8 = undefined;
+
+                        const label = if (std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/")) |_|
+                            "Pull"
+                        else
+                            "Issue";
+                        const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
+                        try ctx.sendDiscordMessage(channel_id.?, title, gh_issue.url.slice());
                     } else |_| {
                         var arena = std.heap.ArenaAllocator.init(ctx.allocator);
                         defer arena.deinit();
 
                         if (try analBuddy.analyse(&arena, &ctx.prepared_anal, ask.slice())) |match| {
-                            std.debug.print("MATCH: {}\n", .{match});
-                        } else {
-                            std.debug.print("NOPE: {}\n", .{ask.slice()});
+                            try ctx.sendDiscordMessage(channel_id.?, ask.slice(), std.mem.trim(u8, match, " \t\r\n"));
                         }
                     }
                 } else {
