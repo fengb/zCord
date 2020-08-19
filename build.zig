@@ -27,6 +27,10 @@ pub fn build(b: *std.build.Builder) void {
         .dependencies = &[_]std.build.Pkg{hzzp},
     });
     exe.addPackage(.{
+        .name = "analysis-buddy",
+        .path = "lib/analysis-buddy/src/main.zig",
+    });
+    exe.addPackage(.{
         .name = "zig-bearssl",
         .path = "lib/zig-bearssl/bearssl.zig",
     });

@@ -8,3 +8,7 @@
 [submodule "lib/wz"]
 	path = lib/wz
 	url = https://github.com/truemedian/wz
+[submodule "lib/analysis-buddy"]
+	path = lib/analysis-buddy
+	url = https://github.com/fengb/analysis-buddy.git
+	branch = patch-1

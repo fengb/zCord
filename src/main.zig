@@ -2,6 +2,7 @@ const std = @import("std");
 const hzzp = @import("hzzp");
 const wz = @import("wz");
 const ssl = @import("zig-bearssl");
+const analBuddy = @import("analysis-buddy");
 
 const request = @import("request.zig");
 const util = @import("util.zig");
@@ -22,6 +23,7 @@ fn Buffer(comptime max_len: usize) type {
 const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
+    prepared_anal: analBuddy.PrepareResult,
 
     pub fn sendDiscordMessage(self: Context, channel_id: u64, issue: GithubIssue) !void {
         var path: [0x100]u8 = undefined;
@@ -123,9 +125,10 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var auth_buf: [0x100]u8 = undefined;
-    const context = Context{
+    var context = Context{
         .allocator = &gpa.allocator,
         .auth_token = try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
+        .prepared_anal = try analBuddy.prepare(&gpa.allocator, std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound),
     };
 
     var discord_ws = try DiscordWs.init(
@@ -133,8 +136,8 @@ pub fn main() !void {
         context.auth_token,
     );
 
-    try discord_ws.run(context, struct {
-        fn handleDispatch(ctx: Context, name: []const u8, data: anytype) !void {
+    try discord_ws.run(&context, struct {
+        fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
@@ -163,8 +166,15 @@ pub fn main() !void {
                     if (std.fmt.parseInt(u32, ask.slice(), 10)) |issue| {
                         const gh_issue = try ctx.requestGithubIssue(issue);
                         try ctx.sendDiscordMessage(channel_id.?, gh_issue);
-                    } else |err| {
-                        std.debug.print("{}\n", .{ask.slice()});
+                    } else |_| {
+                        var arena = std.heap.ArenaAllocator.init(ctx.allocator);
+                        defer arena.deinit();
+
+                        if (try analBuddy.analyse(&arena, &ctx.prepared_anal, ask.slice())) |match| {
+                            std.debug.print("MATCH: {}\n", .{match});
+                        } else {
+                            std.debug.print("NOPE: {}\n", .{ask.slice()});
+                        }
                     }
                 } else {
                     // Not a child. Go back to listening.
