@@ -20,6 +20,24 @@ fn Buffer(comptime max_len: usize) type {
     };
 }
 
+const Escape = struct {
+    text: []const u8,
+
+    pub fn wrap(text: []const u8) Escape {
+        return .{ .text = text };
+    }
+
+    pub fn format(self: Escape, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+        for (self.text) |letter| {
+            switch (letter) {
+                '"' => try out_stream.writeAll("\\\""),
+                '\n' => try out_stream.writeAll("\\n"),
+                else => try out_stream.writeByte(letter),
+            }
+        }
+    }
+};
+
 const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
@@ -69,6 +87,44 @@ const Context = struct {
     }
 
     pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
+        const swh = util.Swhash(16);
+        switch (swh.match(ask)) {
+            swh.case("ping") => return try self.sendDiscordMessage(channel_id, "pong",
+                \\```
+                \\          ,;;;!!!!!;;.
+                \\        :!!!!!!!!!!!!!!;
+                \\      :!!!!!!!!!!!!!!!!!;
+                \\     ;!!!!!!!!!!!!!!!!!!!;
+                \\    ;!!!!!!!!!!!!!!!!!!!!!
+                \\    ;!!!!!!!!!!!!!!!!!!!!'
+                \\    ;!!!!!!!!!!!!!!!!!!!'
+                \\     :!!!!!!!!!!!!!!!!'
+                \\      ,!!!!!!!!!!!!!''
+                \\   ,;!!!''''''''''
+                \\ .!!!!'
+                \\!!!!`
+                \\```
+            ),
+            swh.case("zen") => return try self.sendDiscordMessage(channel_id, "For Great Justice",
+                \\```
+                \\∗ Communicate intent precisely.
+                \\∗ Edge cases matter.
+                \\∗ Favor reading code over writing code.
+                \\∗ Only one obvious way to do things.
+                \\∗ Runtime crashes are better than bugs.
+                \\∗ Compile errors are better than runtime crashes.
+                \\∗ Incremental improvements.
+                \\∗ Avoid local maximums.
+                \\∗ Reduce the amount one must remember.
+                \\∗ Minimize energy spent on coding style.
+                \\∗ Resource deallocation must succeed.
+                \\∗ Together we serve end users.
+                \\```
+            ),
+            swh.case("zenlang"), swh.case("v"), swh.case("vlang") => return try self.sendDiscordMessage(channel_id, "bruh", ""),
+            else => {},
+        }
+
         if (std.fmt.parseInt(u32, ask, 10)) |issue| {
             const gh_issue = try self.requestGithubIssue(issue);
 
@@ -84,11 +140,11 @@ const Context = struct {
 
             if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
                 try self.sendDiscordMessage(channel_id, ask, std.mem.trim(u8, match, " \t\r\n"));
-            }
+            } else {}
         }
     }
 
-    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, url: []const u8) !void {
+    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, body: []const u8) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
@@ -113,7 +169,7 @@ const Context = struct {
             \\  }}
             \\}}
         ,
-            .{ title, url },
+            .{ title, Escape.wrap(body) },
         );
 
         _ = try req.expectSuccessStatus();
