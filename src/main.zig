@@ -33,22 +33,22 @@ const Escape = struct {
         return .{ .text = text };
     }
 
-    pub fn format(self: Escape, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: Escape, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         var start: usize = 0;
         for (self.text) |letter, i| {
             const reserved = std.meta.intToEnum(Reserved, letter) catch continue;
             if (start < i) {
-                try out_stream.writeAll(self.text[start..i]);
+                try writer.writeAll(self.text[start..i]);
             }
             switch (reserved) {
-                .Quote => try out_stream.writeAll("\\\""),
-                .Newline => try out_stream.writeAll("\\n"),
-                .Backslash => try out_stream.writeAll("\\\\"),
+                .Quote => try writer.writeAll("\\\""),
+                .Newline => try writer.writeAll("\\n"),
+                .Backslash => try writer.writeAll("\\\\"),
             }
             start = i + 1;
         }
         if (start < self.text.len) {
-            try out_stream.writeAll(self.text[start..]);
+            try writer.writeAll(self.text[start..]);
         }
     }
 };
