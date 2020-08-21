@@ -104,39 +104,52 @@ const Context = struct {
     pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
         const swh = util.Swhash(16);
         switch (swh.match(ask)) {
-            swh.case("ping") => return try self.sendDiscordMessage(channel_id, "pong",
-                \\```
-                \\          ,;;;!!!!!;;.
-                \\        :!!!!!!!!!!!!!!;
-                \\      :!!!!!!!!!!!!!!!!!;
-                \\     ;!!!!!!!!!!!!!!!!!!!;
-                \\    ;!!!!!!!!!!!!!!!!!!!!!
-                \\    ;!!!!!!!!!!!!!!!!!!!!'
-                \\    ;!!!!!!!!!!!!!!!!!!!'
-                \\     :!!!!!!!!!!!!!!!!'
-                \\      ,!!!!!!!!!!!!!''
-                \\   ,;!!!''''''''''
-                \\ .!!!!'
-                \\!!!!`
-                \\```,
-            , DiscordColor.default),
-            swh.case("zen") => return try self.sendDiscordMessage(channel_id, "For Great Justice",
-                \\```
-                \\∗ Communicate intent precisely.
-                \\∗ Edge cases matter.
-                \\∗ Favor reading code over writing code.
-                \\∗ Only one obvious way to do things.
-                \\∗ Runtime crashes are better than bugs.
-                \\∗ Compile errors are better than runtime crashes.
-                \\∗ Incremental improvements.
-                \\∗ Avoid local maximums.
-                \\∗ Reduce the amount one must remember.
-                \\∗ Minimize energy spent on coding style.
-                \\∗ Resource deallocation must succeed.
-                \\∗ Together we serve end users.
-                \\```
-            , DiscordColor.default),
-            swh.case("zenlang"), swh.case("v"), swh.case("vlang") => return try self.sendDiscordMessage(channel_id, "bruh", "", DiscordColor.default),
+            swh.case("ping") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "pong",
+                .body =
+                    \\```
+                    \\          ,;;;!!!!!;;.
+                    \\        :!!!!!!!!!!!!!!;
+                    \\      :!!!!!!!!!!!!!!!!!;
+                    \\     ;!!!!!!!!!!!!!!!!!!!;
+                    \\    ;!!!!!!!!!!!!!!!!!!!!!
+                    \\    ;!!!!!!!!!!!!!!!!!!!!'
+                    \\    ;!!!!!!!!!!!!!!!!!!!'
+                    \\     :!!!!!!!!!!!!!!!!'
+                    \\      ,!!!!!!!!!!!!!''
+                    \\   ,;!!!''''''''''
+                    \\ .!!!!'
+                    \\!!!!`
+                    \\```
+                            }),
+            swh.case("zen") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "For Great Justice",
+                .body =
+                    \\```
+                    \\∗ Communicate intent precisely.
+                    \\∗ Edge cases matter.
+                    \\∗ Favor reading code over writing code.
+                    \\∗ Only one obvious way to do things.
+                    \\∗ Runtime crashes are better than bugs.
+                    \\∗ Compile errors are better than runtime crashes.
+                    \\∗ Incremental improvements.
+                    \\∗ Avoid local maximums.
+                    \\∗ Reduce the amount one must remember.
+                    \\∗ Minimize energy spent on coding style.
+                    \\∗ Resource deallocation must succeed.
+                    \\∗ Together we serve end users.
+                    \\```
+                            }),
+            swh.case("zenlang"),
+            swh.case("v"),
+            swh.case("vlang"),
+            => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "bruh",
+                .body = "",
+            }),
             else => {},
         }
 
@@ -144,32 +157,44 @@ const Context = struct {
             const gh_issue = try self.requestGithubIssue(issue);
 
             const is_pull_request = std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/") != null;
-            // const label = if (is_pull_request) "```fix\nPull\n```\n" else "```diff\n+ Issue\n```\n";
             const label = if (is_pull_request) "Pull" else "Issue";
-            const color = if (is_pull_request) DiscordColor.blue else DiscordColor.green;
 
             var buf: [0x1000]u8 = undefined;
             const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
-            // std.debug.print("{}\n", .{title});
-            try self.sendDiscordMessage(channel_id, title, gh_issue.url.slice(), color);
+            try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = title,
+                .body = gh_issue.url.slice(),
+                .color = if (is_pull_request) HexColor.blue else HexColor.green,
+            });
         } else |_| {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
             defer arena.deinit();
 
             if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
-                try self.sendDiscordMessage(channel_id, ask, std.mem.trim(u8, match, " \t\r\n"), DiscordColor.default);
+                try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = ask,
+                    .body = std.mem.trim(u8, match, " \t\r\n"),
+                    .color = .red,
+                });
             } else {}
         }
     }
 
-    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, body: []const u8, color_code: []const u8) !void {
+    pub fn sendDiscordMessage(self: Context, args: struct {
+        channel_id: u64,
+        title: []const u8,
+        body: []const u8,
+        color: HexColor = HexColor.black,
+    }) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../discord-com-chain.pem"),
             .host = "discord.com",
             .method = "POST",
-            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{channel_id}),
+            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{args.channel_id}),
         });
         defer req.deinit();
 
@@ -188,7 +213,7 @@ const Context = struct {
             \\  }}
             \\}}
         ,
-            .{ Escape.wrap(title), Escape.wrap(body), color_code },
+            .{ Escape.wrap(args.title), Escape.wrap(args.body), @enumToInt(args.color) },
         );
 
         _ = try req.expectSuccessStatus();
@@ -196,30 +221,17 @@ const Context = struct {
 
     const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
-    const DiscordColor = struct {
-        pub const default = "0";
-        pub const aqua = "1752220";
-        pub const green = "3066993";
-        pub const blue = "3447003";
-        pub const purple = "10181046";
-        pub const gold = "15844367";
-        pub const orange = "15105570";
-        pub const red = "15158332";
-        pub const grey = "9807270";
-        pub const darker_grey = "8359053";
-        pub const navy = "3426654";
-        pub const dark_aqua = "1146986";
-        pub const dark_green = "2067276";
-        pub const dark_blue = "2123412";
-        pub const dark_purple = "7419530";
-        pub const dark_gold = "12745742";
-        pub const dark_orange = "11027200";
-        pub const dark_red = "10038562";
-        pub const dark_grey = "9936031";
-        pub const light_grey = "12370112";
-        pub const dark_navy = "2899536";
-        pub const luminous_vivid_pink = "16580705";
-        pub const dark_vivid_pink = "12320855";
+    const HexColor = enum(u32) {
+        black = 0,
+        aqua = 0x1ABC9C,
+        green = 0x2ECC71,
+        blue = 0x3498DB,
+        red = 0xE74C3C,
+        _,
+
+        pub fn init(raw: u32) HexColor {
+            return @intToEnum(HexColor, raw);
+        }
     };
     pub fn requestGithubIssue(self: Context, issue: u32) !GithubIssue {
         var path: [0x100]u8 = undefined;
