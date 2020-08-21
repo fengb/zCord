@@ -118,8 +118,8 @@ const Context = struct {
                 \\   ,;!!!''''''''''
                 \\ .!!!!'
                 \\!!!!`
-                \\```
-            ),
+                \\```,
+            , DiscordColor.default),
             swh.case("zen") => return try self.sendDiscordMessage(channel_id, "For Great Justice",
                 \\```
                 \\∗ Communicate intent precisely.
@@ -135,8 +135,8 @@ const Context = struct {
                 \\∗ Resource deallocation must succeed.
                 \\∗ Together we serve end users.
                 \\```
-            ),
-            swh.case("zenlang"), swh.case("v"), swh.case("vlang") => return try self.sendDiscordMessage(channel_id, "bruh", ""),
+            , DiscordColor.default),
+            swh.case("zenlang"), swh.case("v"), swh.case("vlang") => return try self.sendDiscordMessage(channel_id, "bruh", "", DiscordColor.default),
             else => {},
         }
 
@@ -144,22 +144,25 @@ const Context = struct {
             const gh_issue = try self.requestGithubIssue(issue);
 
             const is_pull_request = std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/") != null;
+            // const label = if (is_pull_request) "```fix\nPull\n```\n" else "```diff\n+ Issue\n```\n";
             const label = if (is_pull_request) "Pull" else "Issue";
+            const color = if (is_pull_request) DiscordColor.blue else DiscordColor.green;
 
             var buf: [0x1000]u8 = undefined;
             const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
-            try self.sendDiscordMessage(channel_id, title, gh_issue.url.slice());
+            // std.debug.print("{}\n", .{title});
+            try self.sendDiscordMessage(channel_id, title, gh_issue.url.slice(), color);
         } else |_| {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
             defer arena.deinit();
 
             if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
-                try self.sendDiscordMessage(channel_id, ask, std.mem.trim(u8, match, " \t\r\n"));
+                try self.sendDiscordMessage(channel_id, ask, std.mem.trim(u8, match, " \t\r\n"), DiscordColor.default);
             } else {}
         }
     }
 
-    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, body: []const u8) !void {
+    pub fn sendDiscordMessage(self: Context, channel_id: u64, title: []const u8, body: []const u8, color_code: []const u8) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
@@ -180,17 +183,44 @@ const Context = struct {
             \\  "tts": false,
             \\  "embed": {{
             \\    "title": "{0}",
-            \\    "description": "{1}"
+            \\    "description": "{1}",
+            \\    "color": {2}
             \\  }}
             \\}}
         ,
-            .{ Escape.wrap(title), Escape.wrap(body) },
+            .{ Escape.wrap(title), Escape.wrap(body), color_code },
         );
 
         _ = try req.expectSuccessStatus();
     }
 
     const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
+    // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
+    const DiscordColor = struct {
+        pub const default = "0";
+        pub const aqua = "1752220";
+        pub const green = "3066993";
+        pub const blue = "3447003";
+        pub const purple = "10181046";
+        pub const gold = "15844367";
+        pub const orange = "15105570";
+        pub const red = "15158332";
+        pub const grey = "9807270";
+        pub const darker_grey = "8359053";
+        pub const navy = "3426654";
+        pub const dark_aqua = "1146986";
+        pub const dark_green = "2067276";
+        pub const dark_blue = "2123412";
+        pub const dark_purple = "7419530";
+        pub const dark_gold = "12745742";
+        pub const dark_orange = "11027200";
+        pub const dark_red = "10038562";
+        pub const dark_grey = "9936031";
+        pub const light_grey = "12370112";
+        pub const dark_navy = "2899536";
+        pub const luminous_vivid_pink = "16580705";
+        pub const dark_vivid_pink = "12320855";
+    };
     pub fn requestGithubIssue(self: Context, issue: u32) !GithubIssue {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
