@@ -35,11 +35,17 @@ pub fn StreamJson(comptime Reader: type) type {
             Null: void,
         };
 
+        const Error = Reader.Error || std_json.StreamingParser.Error || error{
+        // TODO: remove EndOfStream
+            EndOfStream,
+            WrongElementType,
+        };
+
         pub const Element = struct {
             ctx: *Stream,
             kind: ElementType,
 
-            fn init(ctx: *Stream) !?Element {
+            fn init(ctx: *Stream) Error!?Element {
                 ctx.assertState(.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
 
                 const start_state = ctx.parser.state;
@@ -70,7 +76,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return Element{ .ctx = ctx, .kind = kind };
             }
 
-            pub fn boolean(self: Element) !bool {
+            pub fn boolean(self: Element) Error!bool {
                 if (self.kind != .Boolean) {
                     return error.WrongElementType;
                 }
@@ -83,7 +89,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
             }
 
-            pub fn optionalBoolean(self: Element) !?bool {
+            pub fn optionalBoolean(self: Element) Error!?bool {
                 if (try self.checkOptional()) {
                     return null;
                 } else {
@@ -98,7 +104,6 @@ pub fn StreamJson(comptime Reader: type) type {
                     return try self.number(T);
                 }
             }
-
             pub fn number(self: Element, comptime T: type) !T {
                 if (self.kind != .Number) {
                     return error.WrongElementType;
@@ -129,7 +134,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return error.Overflow;
             }
 
-            pub fn stringBuffer(self: Element, buffer: []u8) ![]u8 {
+            pub fn stringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})![]u8 {
                 if (self.kind != .String) {
                     return error.WrongElementType;
                 }
@@ -149,7 +154,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return error.NoSpaceLeft;
             }
 
-            pub fn optionalStringBuffer(self: Element, buffer: []u8) !?[]u8 {
+            pub fn optionalStringBuffer(self: Element, buffer: []u8) Error!?[]u8 {
                 if (try self.checkOptional()) {
                     return null;
                 } else {
@@ -157,7 +162,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
             }
 
-            pub fn arrayNext(self: Element) !?Element {
+            pub fn arrayNext(self: Element) Error!?Element {
                 if (self.kind != .Array) {
                     return error.WrongElementType;
                 }
@@ -309,7 +314,7 @@ pub fn StreamJson(comptime Reader: type) type {
             }
         };
 
-        pub fn root(self: *Stream) !Element {
+        pub fn root(self: *Stream) Error!Element {
             if (self._root == null) {
                 self._root = (try Element.init(self)).?;
             }
@@ -356,7 +361,10 @@ pub fn StreamJson(comptime Reader: type) type {
             }
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
-            try ctx.parser.feed(byte, &token1, &token2);
+            ctx.parser.feed(byte, &token1, &token2) catch |err| {
+                ctx.debugDump(std.io.getStdErr().writer()) catch {};
+                return err;
+            };
             return token1;
         }
     };
@@ -375,8 +383,8 @@ fn ExpectedType(comptime ActualType: type) type {
 }
 
 test "boolean" {
-    var fba = std.io.fixedBufferStream("[true]");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("[true]");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     const element = (try root.arrayNext()).?;
@@ -385,8 +393,8 @@ test "boolean" {
 }
 
 test "null" {
-    var fba = std.io.fixedBufferStream("[null]");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("[null]");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     const element = (try root.arrayNext()).?;
@@ -396,8 +404,8 @@ test "null" {
 
 test "number" {
     {
-        var fba = std.io.fixedBufferStream("[1]");
-        var stream = streamJson(fba.reader());
+        var fbs = std.io.fixedBufferStream("[1]");
+        var stream = streamJson(fbs.reader());
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
@@ -406,8 +414,8 @@ test "number" {
     }
     {
         // Technically invalid, but we don't stream far enough to find out
-        var fba = std.io.fixedBufferStream("[123,]");
-        var stream = streamJson(fba.reader());
+        var fbs = std.io.fixedBufferStream("[123,]");
+        var stream = streamJson(fbs.reader());
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
@@ -415,8 +423,8 @@ test "number" {
         expectEqual(try element.number(u8), 123);
     }
     {
-        var fba = std.io.fixedBufferStream("[-128]");
-        var stream = streamJson(fba.reader());
+        var fbs = std.io.fixedBufferStream("[-128]");
+        var stream = streamJson(fbs.reader());
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
@@ -424,8 +432,8 @@ test "number" {
         expectEqual(try element.number(i8), -128);
     }
     {
-        var fba = std.io.fixedBufferStream("[456]");
-        var stream = streamJson(fba.reader());
+        var fbs = std.io.fixedBufferStream("[456]");
+        var stream = streamJson(fbs.reader());
 
         const root = try stream.root();
         const element = (try root.arrayNext()).?;
@@ -436,10 +444,10 @@ test "number" {
 
 test "string" {
     {
-        var fba = std.io.fixedBufferStream(
+        var fbs = std.io.fixedBufferStream(
             \\"hello world"
         );
-        var stream = streamJson(fba.reader());
+        var stream = streamJson(fbs.reader());
 
         const element = try stream.root();
         expectEqual(element.kind, .String);
@@ -449,8 +457,8 @@ test "string" {
 }
 
 test "empty array" {
-    var fba = std.io.fixedBufferStream("[]");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("[]");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Array);
@@ -459,8 +467,8 @@ test "empty array" {
 }
 
 test "array of simple values" {
-    var fba = std.io.fixedBufferStream("[false, true, null]");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("[false, true, null]");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Array);
@@ -489,8 +497,8 @@ test "array of simple values" {
 }
 
 test "array of numbers" {
-    var fba = std.io.fixedBufferStream("[1, 2, -3]");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("[1, 2, -3]");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Array);
@@ -520,10 +528,10 @@ test "array of numbers" {
 }
 
 test "array of strings" {
-    var fba = std.io.fixedBufferStream(
+    var fbs = std.io.fixedBufferStream(
         \\["hello", "world"]);
     );
-    var stream = streamJson(fba.reader());
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Array);
@@ -548,8 +556,8 @@ test "array of strings" {
 }
 
 test "empty object" {
-    var fba = std.io.fixedBufferStream("{}");
-    var stream = streamJson(fba.reader());
+    var fbs = std.io.fixedBufferStream("{}");
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Object);
@@ -558,10 +566,10 @@ test "empty object" {
 }
 
 test "object match" {
-    var fba = std.io.fixedBufferStream(
+    var fbs = std.io.fixedBufferStream(
         \\{"foo": true, "bar": false}
     );
-    var stream = streamJson(fba.reader());
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Object);
@@ -586,10 +594,10 @@ test "object match" {
 }
 
 test "object match any" {
-    var fba = std.io.fixedBufferStream(
+    var fbs = std.io.fixedBufferStream(
         \\{"foo": true, "foobar": false, "bar": null}
     );
-    var stream = streamJson(fba.reader());
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Object);
@@ -614,15 +622,47 @@ test "object match any" {
 }
 
 test "object match not found" {
-    var fba = std.io.fixedBufferStream(
+    var fbs = std.io.fixedBufferStream(
         \\{"foo": [[]], "bar": false, "baz": {}}
     );
-    var stream = streamJson(fba.reader());
+    var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
     expectEqual(root.kind, .Object);
 
     expectEqual(try root.objectMatch("???"), null);
+}
+
+fn expectElement(e: anytype) StreamJson(std.io.FixedBufferStream([]const u8).Reader).Error!void {
+    switch (e.kind) {
+        // TODO: test objects better
+        .Object => _ = try e.finalizeToken(),
+        .Array => {
+            while (try e.arrayNext()) |child| {
+                try expectElement(child);
+            }
+        },
+        .String => _ = try e.finalizeToken(),
+        // TODO: fix inferred errors
+        // .Number => _ = try e.number(u64),
+        .Number => _ = try e.finalizeToken(),
+        .Boolean => _ = try e.boolean(),
+        .Null => _ = try e.optionalBoolean(),
+    }
+}
+
+fn expectValidParseOutput(input: []const u8) !void {
+    var fbs = std.io.fixedBufferStream(input);
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    try expectElement(root);
+}
+
+test "smoke" {
+    try expectValidParseOutput(
+        \\[[], [], [[]], [[""], [], [[], 0], null], false]
+    );
 }
 /// Super simple "perfect hash" algorithm
 /// Only really useful for switching on strings
