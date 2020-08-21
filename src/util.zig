@@ -207,23 +207,20 @@ pub fn StreamJson(comptime Reader: type) type {
                     const key_element = (try Element.init(self.ctx)) orelse return null;
                     std.debug.assert(key_element.kind == .String);
 
-                    if (try key_element.stringFind(keys)) |key| {
-                        // Skip over the colon
-                        while (self.ctx.parser.state == .ObjectSeparator) {
-                            _ = try self.ctx.feed(try self.ctx.reader.readByte());
-                        }
+                    const key_match = try key_element.stringFind(keys);
 
+                    // Skip over the colon
+                    while (self.ctx.parser.state == .ObjectSeparator) {
+                        _ = try self.ctx.feed(try self.ctx.reader.readByte());
+                    }
+
+                    if (key_match) |key| {
                         // Match detected
                         return ObjectMatch{
                             .key = key,
                             .value = (try Element.init(self.ctx)).?,
                         };
                     } else {
-                        // Skip over the colon
-                        while (self.ctx.parser.state == .ObjectSeparator) {
-                            _ = try self.ctx.feed(try self.ctx.reader.readByte());
-                        }
-
                         // Skip over value
                         const value_element = (try Element.init(self.ctx)).?;
                         const tok = try value_element.finalizeToken();
