@@ -319,8 +319,7 @@ pub fn main() !void {
                 const swh = util.Swhash(16);
                 switch (swh.match(match.key)) {
                     swh.case("content") => {
-                        var buf: [0x10000]u8 = undefined;
-                        ask = findAsk(try match.value.stringBuffer(&buf));
+                        ask = try findAsk(try match.value.stringReader());
                     },
                     swh.case("channel_id") => {
                         var buf: [0x100]u8 = undefined;
@@ -336,7 +335,7 @@ pub fn main() !void {
             }
         }
 
-        fn findAsk(string: []const u8) Buffer(0x100) {
+        fn findAsk(reader: anytype) !Buffer(0x100) {
             const State = enum {
                 no_match,
                 percent,
@@ -345,7 +344,7 @@ pub fn main() !void {
             var state = State.no_match;
             var buffer: Buffer(0x100) = .{};
 
-            for (string) |c| {
+            while (reader.readByte()) |c| {
                 switch (state) {
                     .no_match => {
                         if (c == '%') {
@@ -365,9 +364,10 @@ pub fn main() !void {
                         }
                     },
                 }
+            } else |err| switch (err) {
+                error.EndOfStream => return buffer,
+                else => |e| return e,
             }
-
-            return buffer;
         }
     });
     std.debug.print("Terminus\n\n", .{});
