@@ -227,6 +227,7 @@ const Context = struct {
         green = 0x2ECC71,
         blue = 0x3498DB,
         red = 0xE74C3C,
+        gold = 0xF1C40F,
         _,
 
         pub fn init(raw: u32) HexColor {
