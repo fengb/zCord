@@ -150,6 +150,19 @@ const Context = struct {
                 .title = "bruh",
                 .body = "",
             }),
+            swh.case("u0") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "Zig's billion dollar mistake™",
+                .body = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
+            }),
+            swh.case("5076") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .color = .green,
+                .title = "Issue #5076 — syntax: drop the `const` keyword in global scopes",
+                .body =
+                    \\~~https://github.com/ziglang/zig/issues/5076~~
+                    \\https://www.youtube.com/watch?v=880uR25pP5U
+                            }),
             else => {},
         }
 
