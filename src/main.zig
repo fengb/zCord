@@ -234,7 +234,7 @@ const Context = struct {
 
     const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
-    const HexColor = enum(u32) {
+    const HexColor = enum(u24) {
         black = 0,
         aqua = 0x1ABC9C,
         green = 0x2ECC71,
