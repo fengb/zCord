@@ -36,9 +36,8 @@ pub fn StreamJson(comptime Reader: type) type {
         };
 
         const Error = Reader.Error || std_json.StreamingParser.Error || error{
-        // TODO: remove EndOfStream
-            EndOfStream,
             WrongElementType,
+            UnexpectedEndOfJson,
         };
 
         pub const Element = struct {
@@ -51,7 +50,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 const start_state = ctx.parser.state;
                 const kind: ElementType = blk: {
                     while (true) {
-                        const byte = try ctx.reader.readByte();
+                        const byte = try ctx.nextByte();
 
                         if (try ctx.feed(byte)) |token| {
                             switch (token) {
@@ -119,7 +118,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 buffer[0] = self.kind.Number.first_char;
 
                 for (buffer[1..]) |*c, i| {
-                    const byte = try self.ctx.reader.readByte();
+                    const byte = try self.ctx.nextByte();
 
                     if (try self.ctx.feed(byte)) |token| {
                         const len = i + 1;
@@ -140,7 +139,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
 
                 for (buffer) |*c, i| {
-                    const byte = try self.ctx.reader.readByte();
+                    const byte = try self.ctx.nextByte();
 
                     if (try self.ctx.feed(byte)) |token| {
                         std.debug.assert(token == .String);
@@ -154,7 +153,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return error.NoSpaceLeft;
             }
 
-            pub fn optionalStringBuffer(self: Element, buffer: []u8) Error!?[]u8 {
+            pub fn optionalStringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})!?[]u8 {
                 if (try self.checkOptional()) {
                     return null;
                 } else {
@@ -173,7 +172,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                 // Scan for next element
                 while (self.ctx.parser.state == .ValueEnd) {
-                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                    if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
                         std.debug.assert(token == .ArrayEnd);
                         return null;
                     }
@@ -203,7 +202,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                     // Scan for next element
                     while (self.ctx.parser.state == .ValueEnd) {
-                        if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                        if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
                             std.debug.assert(token == .ObjectEnd);
                             return null;
                         }
@@ -216,7 +215,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                     // Skip over the colon
                     while (self.ctx.parser.state == .ObjectSeparator) {
-                        _ = try self.ctx.feed(try self.ctx.reader.readByte());
+                        _ = try self.ctx.feed(try self.ctx.nextByte());
                     }
 
                     if (key_match) |key| {
@@ -257,7 +256,7 @@ pub fn StreamJson(comptime Reader: type) type {
                     while (!string_complete and tail <= check.len and
                         (tail < 1 or check[tail - 1] == last_byte)) : (tail += 1)
                     {
-                        last_byte = try self.ctx.reader.readByte();
+                        last_byte = try self.ctx.nextByte();
                         if (try self.ctx.feed(last_byte)) |token| {
                             std.debug.assert(token == .String);
                             string_complete = true;
@@ -283,9 +282,9 @@ pub fn StreamJson(comptime Reader: type) type {
                 return true;
             }
 
-            pub fn finalizeToken(self: Element) !std_json.Token {
+            pub fn finalizeToken(self: Element) Error!std_json.Token {
                 while (true) {
-                    if (try self.ctx.feed(try self.ctx.reader.readByte())) |token| {
+                    if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
                         switch (self.kind) {
                             .Boolean => std.debug.assert(token == .True or token == .False),
                             .Null => std.debug.assert(token == .Null),
@@ -347,6 +346,13 @@ pub fn StreamJson(comptime Reader: type) type {
             const size = try reader.read(&buf);
             try writer.writeAll(buf[0..size]);
             try writer.writeByte('\n');
+        }
+
+        fn nextByte(ctx: *Stream) Error!u8 {
+            return ctx.reader.readByte() catch |err| switch (err) {
+                error.EndOfStream => error.UnexpectedEndOfJson,
+                else => |e| e,
+            };
         }
 
         // A simpler feed() to enable one liners.
