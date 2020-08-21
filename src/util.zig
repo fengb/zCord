@@ -134,23 +134,42 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             pub fn stringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})![]u8 {
+                const reader = try self.stringReader();
+                const size = try reader.readAll(buffer);
+                return buffer[0..size];
+            }
+
+            const StringReader = std.io.Reader(
+                Element,
+                Error,
+                (struct {
+                    fn read(self: Element, buffer: []u8) Error!usize {
+                        if (self.ctx.parser.state == .ValueEnd or self.ctx.parser.state == .TopLevelEnd) {
+                            return 0;
+                        }
+
+                        for (buffer) |*c, i| {
+                            const byte = try self.ctx.nextByte();
+
+                            if (try self.ctx.feed(byte)) |token| {
+                                std.debug.assert(token == .String);
+                                return i;
+                            } else {
+                                c.* = byte;
+                            }
+                        }
+
+                        return buffer.len;
+                    }
+                }).read,
+            );
+
+            pub fn stringReader(self: Element) Error!StringReader {
                 if (self.kind != .String) {
                     return error.WrongElementType;
                 }
 
-                for (buffer) |*c, i| {
-                    const byte = try self.ctx.nextByte();
-
-                    if (try self.ctx.feed(byte)) |token| {
-                        std.debug.assert(token == .String);
-                        std.debug.assert(token.String.count == i);
-                        return buffer[0..i];
-                    } else {
-                        c.* = byte;
-                    }
-                }
-
-                return error.NoSpaceLeft;
+                return StringReader{ .context = self };
             }
 
             pub fn optionalStringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})!?[]u8 {
