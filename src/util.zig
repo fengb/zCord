@@ -39,7 +39,7 @@ pub fn StreamJson(comptime Reader: type) type {
             ctx: *Stream,
             kind: ElementType,
 
-            pub fn init(ctx: *Stream) !Element {
+            fn init(ctx: *Stream) !?Element {
                 ctx.assertState(.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
 
                 const start_state = ctx.parser.state;
@@ -51,6 +51,7 @@ pub fn StreamJson(comptime Reader: type) type {
                             switch (token) {
                                 .ArrayBegin => break :blk .{ .Array = .{ .stack_level = ctx.parser.stack_used } },
                                 .ObjectBegin => break :blk .{ .Object = .{ .stack_level = ctx.parser.stack_used } },
+                                .ArrayEnd, .ObjectEnd => return null,
                                 else => ctx.assertFailure("Element unrecognized: {}", .{token}),
                             }
                         }
@@ -203,7 +204,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         }
                     }
 
-                    const key_element = try Element.init(self.ctx);
+                    const key_element = (try Element.init(self.ctx)) orelse return null;
                     std.debug.assert(key_element.kind == .String);
 
                     if (try key_element.stringFind(keys)) |key| {
@@ -215,7 +216,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         // Match detected
                         return ObjectMatch{
                             .key = key,
-                            .value = try Element.init(self.ctx),
+                            .value = (try Element.init(self.ctx)).?,
                         };
                     } else {
                         // Skip over the colon
@@ -224,7 +225,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         }
 
                         // Skip over value
-                        const value_element = try Element.init(self.ctx);
+                        const value_element = (try Element.init(self.ctx)).?;
                         const tok = try value_element.finalizeToken();
                     }
                 }
@@ -313,7 +314,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
         pub fn root(self: *Stream) !Element {
             if (self._root == null) {
-                self._root = try Element.init(self);
+                self._root = (try Element.init(self)).?;
             }
             return self._root.?;
         }
@@ -450,6 +451,16 @@ test "string" {
     }
 }
 
+test "empty array" {
+    var fba = std.io.fixedBufferStream("[]");
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Array);
+
+    expectEqual(try root.arrayNext(), null);
+}
+
 test "array of simple values" {
     var fba = std.io.fixedBufferStream("[false, true, null]");
     var stream = streamJson(fba.reader());
@@ -537,6 +548,16 @@ test "array of strings" {
     }
 
     expectEqual(try root.arrayNext(), null);
+}
+
+test "empty object" {
+    var fba = std.io.fixedBufferStream("{}");
+    var stream = streamJson(fba.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Object);
+
+    expectEqual(try root.objectMatch(""), null);
 }
 
 test "object match" {
