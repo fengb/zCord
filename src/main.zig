@@ -211,9 +211,9 @@ const Context = struct {
         });
         defer req.deinit();
 
-        try req.client.writeHeader("Accept", "application/json");
-        try req.client.writeHeader("Content-Type", "application/json");
-        try req.client.writeHeader("Authorization", self.auth_token);
+        try req.client.writeHeaderValue("Accept", "application/json");
+        try req.client.writeHeaderValue("Content-Type", "application/json");
+        try req.client.writeHeaderValue("Authorization", self.auth_token);
 
         try req.printSend(
             \\{{
@@ -258,7 +258,7 @@ const Context = struct {
         });
         defer req.deinit();
 
-        try req.client.writeHeader("Accept", "application/json");
+        try req.client.writeHeaderValue("Accept", "application/json");
         try req.client.writeHeadComplete();
         try req.ssl_tunnel.conn.flush();
 
@@ -378,7 +378,7 @@ const DiscordWs = struct {
 
     ssl_tunnel: *request.SslTunnel,
 
-    client: wz.BaseClient.BaseClient(request.SslTunnel.Stream.DstInStream, request.SslTunnel.Stream.DstOutStream),
+    client: wz.base.Client.Client(request.SslTunnel.Stream.DstInStream, request.SslTunnel.Stream.DstOutStream),
     client_buffer: []u8,
     write_mutex: std.Mutex,
 
@@ -428,17 +428,16 @@ const DiscordWs = struct {
         result.client_buffer = try allocator.alloc(u8, 0x1000);
         errdefer allocator.free(result.client_buffer);
 
-        result.client = wz.BaseClient.create(
+        result.client = wz.base.Client.create(
             result.client_buffer,
             result.ssl_tunnel.conn.inStream(),
             result.ssl_tunnel.conn.outStream(),
         );
 
         // Handshake
-        var handshake_headers = std.http.Headers.init(allocator);
-        defer handshake_headers.deinit();
-        try handshake_headers.append("Host", "gateway.discord.gg", null);
-        try result.client.sendHandshake(&handshake_headers, "/?v=6&encoding=json");
+        try result.client.sendHandshakeHead("/?v=6&encoding=json");
+        try result.client.sendHandshakeHeaderValue("Host", "gateway.discord.gg");
+        try result.client.sendHandshakeHeadComplete();
         try result.ssl_tunnel.conn.flush();
         try result.client.waitForHandshake();
 

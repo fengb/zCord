@@ -64,7 +64,7 @@ pub const Https = struct {
     buffer: []u8,
     client: HzzpClient,
 
-    const HzzpClient = hzzp.BaseClient.BaseClient(SslTunnel.Stream.DstInStream, SslTunnel.Stream.DstOutStream);
+    const HzzpClient = hzzp.base.Client.Client(SslTunnel.Stream.DstInStream, SslTunnel.Stream.DstOutStream);
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
@@ -85,12 +85,12 @@ pub const Https = struct {
         const buffer = try args.allocator.alloc(u8, 0x1000);
         errdefer args.allocator.free(buffer);
 
-        var client = hzzp.BaseClient.create(buffer, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+        var client = hzzp.base.Client.create(buffer, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
 
         try client.writeHead(args.method, args.path);
 
-        try client.writeHeader("Host", args.host);
-        try client.writeHeader("User-Agent", bot_agent);
+        try client.writeHeaderValue("Host", args.host);
+        try client.writeHeaderValue("User-Agent", bot_agent);
 
         return Https{
             .allocator = args.allocator,
@@ -109,7 +109,7 @@ pub const Https = struct {
     // TODO: fix this name
     pub fn printSend(self: *Https, comptime fmt: []const u8, args: anytype) !void {
         var buf: [0x10]u8 = undefined;
-        try self.client.writeHeader(
+        try self.client.writeHeaderValue(
             "Content-Length",
             try std.fmt.bufPrint(&buf, "{}", .{std.fmt.count(fmt, args)}),
         );
