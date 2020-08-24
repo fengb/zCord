@@ -7,6 +7,9 @@ pub fn streamJson(reader: anytype) StreamJson(@TypeOf(reader)) {
     return .{
         .reader = reader,
         .parser = std_json.StreamingParser.init(),
+
+        .element_number = 0,
+
         ._root = null,
         ._debug_buffer = if (debug_buffer)
             std.fifo.LinearFifo(u8, .{ .Static = 0x100 }).init()
@@ -20,6 +23,9 @@ pub fn StreamJson(comptime Reader: type) type {
 
         reader: Reader,
         parser: std_json.StreamingParser,
+
+        element_number: usize,
+
         _root: ?Element,
         _debug_buffer: if (debug_buffer)
             std.fifo.LinearFifo(u8, .{ .Static = 0x100 })
@@ -27,8 +33,8 @@ pub fn StreamJson(comptime Reader: type) type {
             void,
 
         const ElementType = union(enum) {
-            Object: struct { stack_level: u8 },
-            Array: struct { stack_level: u8 },
+            Object: void,
+            Array: void,
             String: void,
             Number: struct { first_char: u8 },
             Boolean: void,
@@ -44,6 +50,9 @@ pub fn StreamJson(comptime Reader: type) type {
             ctx: *Stream,
             kind: ElementType,
 
+            element_number: usize,
+            stack_level: u8,
+
             fn init(ctx: *Stream) Error!?Element {
                 ctx.assertState(.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
 
@@ -54,8 +63,8 @@ pub fn StreamJson(comptime Reader: type) type {
 
                         if (try ctx.feed(byte)) |token| {
                             switch (token) {
-                                .ArrayBegin => break :blk .{ .Array = .{ .stack_level = ctx.parser.stack_used } },
-                                .ObjectBegin => break :blk .{ .Object = .{ .stack_level = ctx.parser.stack_used } },
+                                .ArrayBegin => break :blk .Array,
+                                .ObjectBegin => break :blk .Object,
                                 .ArrayEnd, .ObjectEnd => return null,
                                 else => ctx.assertFailure("Element unrecognized: {}", .{token}),
                             }
@@ -72,7 +81,8 @@ pub fn StreamJson(comptime Reader: type) type {
                         }
                     }
                 };
-                return Element{ .ctx = ctx, .kind = kind };
+                ctx.element_number += 1;
+                return Element{ .ctx = ctx, .kind = kind, .element_number = ctx.element_number, .stack_level = ctx.parser.stack_used };
             }
 
             pub fn boolean(self: Element) Error!bool {
@@ -246,7 +256,7 @@ pub fn StreamJson(comptime Reader: type) type {
                     } else {
                         // Skip over value
                         const value_element = (try Element.init(self.ctx)).?;
-                        const tok = try value_element.finalizeToken();
+                        _ = try value_element.finalizeToken();
                     }
                 }
             }
@@ -302,28 +312,40 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             pub fn finalizeToken(self: Element) Error!std_json.Token {
+                switch (self.kind) {
+                    .Boolean, .Null, .Number, .String => {
+                        std.debug.assert(self.element_number == self.ctx.element_number);
+                    },
+                    .Array, .Object => {
+                        std.debug.assert(self.ctx.parser.stack_used >= self.stack_level);
+                    },
+                }
+
                 while (true) {
-                    if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
+                    const byte = try self.ctx.nextByte();
+                    if (try self.ctx.feed(byte)) |token| {
                         switch (self.kind) {
                             .Boolean => std.debug.assert(token == .True or token == .False),
                             .Null => std.debug.assert(token == .Null),
                             .Number => std.debug.assert(token == .Number),
                             .String => std.debug.assert(token == .String),
-                            .Array => |arr| {
-                                if (self.ctx.parser.stack_used >= arr.stack_level) {
+                            .Array => {
+                                if (self.ctx.parser.stack_used >= self.stack_level) {
                                     continue;
                                 }
                                 // Number followed by ArrayEnd generates two tokens at once
-                                // causing this assertion to be unreliable.
-                                // std.debug.assert(token == .ArrayEnd);
+                                // causing raw token assertion to be unreliable.
+                                std.debug.assert(byte == ']');
+                                return .ArrayEnd;
                             },
-                            .Object => |obj| {
-                                if (self.ctx.parser.stack_used >= obj.stack_level) {
+                            .Object => {
+                                if (self.ctx.parser.stack_used >= self.stack_level) {
                                     continue;
                                 }
                                 // Number followed by ObjectEnd generates two tokens at once
-                                // causing this assertion to be unreliable.
-                                // std.debug.assert(token == .ObjectEnd);
+                                // causing raw token assertion to be unreliable.
+                                std.debug.assert(byte == '}');
+                                return .ObjectEnd;
                             },
                         }
                         return token;
