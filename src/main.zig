@@ -597,3 +597,8 @@ const DiscordWs = struct {
         }
     }
 };
+
+test "" {
+    _ = request;
+    _ = util;
+}

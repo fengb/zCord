@@ -1,0 +1,22 @@
+name: Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v1.2.2
+        with:
+          version: master
+
+      - run: zig build test
