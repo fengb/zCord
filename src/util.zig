@@ -391,7 +391,8 @@ pub fn StreamJson(comptime Reader: type) type {
                 ctx.debugDump(std.io.getStdErr().writer()) catch {};
             }
             if (std.debug.runtime_safety) {
-                std.debug.panic(fmt, args);
+                var buffer: [0x1000]u8 = undefined;
+                @panic(std.fmt.bufPrint(&buffer, fmt, args) catch &buffer);
             }
         }
 
