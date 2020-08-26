@@ -113,17 +113,33 @@ pub fn StreamJson(comptime Reader: type) type {
                     return try self.number(T);
                 }
             }
+
             pub fn number(self: Element, comptime T: type) !T {
                 if (self.kind != .Number) {
                     return error.WrongElementType;
                 }
 
-                // +1 for converting floor -> ceil
-                // +1 for negative sign
-                // +1 for simplifying terminating character detection
-                const max_digits = std.math.log10(std.math.maxInt(T)) + 3;
-                var buffer: [max_digits]u8 = undefined;
+                switch (@typeInfo(T)) {
+                    .Int => {
+                        // +1 for converting floor -> ceil
+                        // +1 for negative sign
+                        // +1 for simplifying terminating character detection
+                        const max_digits = std.math.log10(std.math.maxInt(T)) + 3;
+                        var buffer: [max_digits]u8 = undefined;
 
+                        return try std.fmt.parseInt(T, try self.numberBuffer(&buffer), 10);
+                    },
+                    .Float => {
+                        const max_digits = 0x1000; // Yeah this is a total kludge, but floats are hard. :(
+                        var buffer: [max_digits]u8 = undefined;
+
+                        return try std.fmt.parseFloat(T, try self.numberBuffer(&buffer));
+                    },
+                    else => @compileError("Unsupported number type"),
+                }
+            }
+
+            fn numberBuffer(self: Element, buffer: []u8) (Error || error{Overflow})![]u8 {
                 // Handle first byte manually
                 buffer[0] = self.kind.Number.first_char;
 
@@ -134,7 +150,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         const len = i + 1;
                         std.debug.assert(token == .Number);
                         std.debug.assert(token.Number.count == len);
-                        return try std.fmt.parseInt(T, buffer[0..len], 10);
+                        return buffer[0..len];
                     } else {
                         c.* = byte;
                     }
@@ -449,7 +465,7 @@ test "null" {
     expectEqual(try element.optionalBoolean(), null);
 }
 
-test "number" {
+test "integer" {
     {
         var fbs = std.io.fixedBufferStream("[1]");
         var stream = streamJson(fbs.reader());
@@ -486,6 +502,46 @@ test "number" {
         const element = (try root.arrayNext()).?;
         expectEqual(element.kind, .Number);
         expectEqual(element.number(u8), error.Overflow);
+    }
+}
+
+test "float" {
+    {
+        var fbs = std.io.fixedBufferStream("[1.125]");
+        var stream = streamJson(fbs.reader());
+
+        const root = try stream.root();
+        const element = (try root.arrayNext()).?;
+        expectEqual(element.kind, .Number);
+        expectEqual(try element.number(f32), 1.125);
+    }
+    {
+        // Technically invalid, but we don't stream far enough to find out
+        var fbs = std.io.fixedBufferStream("[2.5,]");
+        var stream = streamJson(fbs.reader());
+
+        const root = try stream.root();
+        const element = (try root.arrayNext()).?;
+        expectEqual(element.kind, .Number);
+        expectEqual(try element.number(f64), 2.5);
+    }
+    {
+        var fbs = std.io.fixedBufferStream("[-1]");
+        var stream = streamJson(fbs.reader());
+
+        const root = try stream.root();
+        const element = (try root.arrayNext()).?;
+        expectEqual(element.kind, .Number);
+        expectEqual(try element.number(f64), -1);
+    }
+    {
+        var fbs = std.io.fixedBufferStream("[1e64]");
+        var stream = streamJson(fbs.reader());
+
+        const root = try stream.root();
+        const element = (try root.arrayNext()).?;
+        expectEqual(element.kind, .Number);
+        expectEqual(element.number(f64), 1e64);
     }
 }
 
