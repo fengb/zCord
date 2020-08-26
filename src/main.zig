@@ -56,18 +56,20 @@ const Escape = struct {
 const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
+    github_auth_token: ?[]const u8,
     prepared_anal: analBuddy.PrepareResult,
 
     ask_mailbox: struct { ask: Buffer(0x100), channel_id: u64 },
     ask_mutex: std.Mutex,
     ask_thread: *std.Thread,
 
-    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8) !*Context {
+    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8, github_auth_token: ?[]const u8) !*Context {
         const result = try allocator.create(Context);
         errdefer allocator.destroy(result);
 
         result.allocator = allocator;
         result.auth_token = auth_token;
+        result.github_auth_token = github_auth_token;
         result.prepared_anal = try analBuddy.prepare(allocator, ziglib);
         errdefer analBuddy.dispose(&result.prepared_anal);
 
@@ -259,6 +261,11 @@ const Context = struct {
         defer req.deinit();
 
         try req.client.writeHeaderValue("Accept", "application/json");
+        if (self.github_auth_token) |github_auth_token| {
+            var auth_buf: [0x100]u8 = undefined;
+            const token = try std.fmt.bufPrint(&auth_buf, "token {}", .{github_auth_token});
+            try req.client.writeHeaderValue("Authorization", token);
+        }
         try req.client.writeHeadComplete();
         try req.ssl_tunnel.conn.flush();
 
@@ -300,6 +307,7 @@ pub fn main() !void {
         &gpa.allocator,
         try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
         std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound,
+        std.os.getenv("GITHUB_AUTH"),
     );
 
     var discord_ws = try DiscordWs.init(
