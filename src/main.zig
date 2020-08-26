@@ -342,7 +342,13 @@ pub fn main() !void {
                 const swh = util.Swhash(16);
                 switch (swh.match(match.key)) {
                     swh.case("content") => {
-                        ask = try findAsk(try match.value.stringReader());
+                        var reader = try match.value.stringReader();
+                        ask = try findAsk(reader);
+
+                        // Throw away the rest of this reader
+                        // TODO: push this into finalizeToken (?)
+                        var buf: [0x100]u8 = undefined;
+                        while ((try reader.read(&buf)) != 0) {}
                     },
                     swh.case("channel_id") => {
                         var buf: [0x100]u8 = undefined;
@@ -546,7 +552,7 @@ const DiscordWs = struct {
                 // Text Frame
                 1 => {
                     self.processChunks(ctx, handler) catch |err| {
-                        std.debug.print("{}\n", .{err});
+                        std.debug.print("Process chunks failed: {}\n", .{err});
                     };
                 },
                 // Ping, Pong
