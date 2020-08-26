@@ -330,7 +330,7 @@ pub fn main() !void {
         context.auth_token,
     );
 
-    try discord_ws.run(context, struct {
+    discord_ws.run(context, struct {
         fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
             std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
@@ -392,8 +392,11 @@ pub fn main() !void {
                 else => |e| return e,
             }
         }
-    });
-    std.debug.print("Terminus\n\n", .{});
+    }) catch |err| {
+        @panic(@errorName(err));
+    };
+
+    @panic("Terminus");
 }
 
 const DiscordWs = struct {
@@ -539,9 +542,19 @@ const DiscordWs = struct {
             // Skip over any remaining chunks. The processor didn't take care of it.
             if (event != .header) continue;
 
-            self.processChunks(ctx, handler) catch |err| {
-                std.debug.print("{}\n", .{err});
-            };
+            switch (event.header.opcode) {
+                // Text Frame
+                1 => {
+                    self.processChunks(ctx, handler) catch |err| {
+                        std.debug.print("{}\n", .{err});
+                    };
+                },
+                // Ping, Pong
+                9, 10 => {},
+                8 => return error.ConnectionReset,
+                2 => return error.WtfBinary,
+                else => return error.WtfWtf,
+            }
         }
     }
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
