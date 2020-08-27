@@ -332,7 +332,6 @@ pub fn main() !void {
 
     discord_ws.run(context, struct {
         fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
-            std.debug.print(">> {}\n", .{name});
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
             var ask: Buffer(0x100) = .{};
@@ -564,48 +563,46 @@ const DiscordWs = struct {
         }
     }
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        while (try self.client.readEvent()) |event| {
-            if (event != .chunk) continue;
+        const event = (try self.client.readEvent()) orelse return error.NoBody;
 
-            var name_buf: [32]u8 = undefined;
-            var name: ?[]u8 = null;
-            var op: ?Opcode = null;
+        var name_buf: [32]u8 = undefined;
+        var name: ?[]u8 = null;
+        var op: ?Opcode = null;
 
-            var fba = std.io.fixedBufferStream(event.chunk.data);
-            var stream = util.streamJson(fba.reader());
-            const root = try stream.root();
+        var fba = std.io.fixedBufferStream(event.chunk.data);
+        var stream = util.streamJson(fba.reader());
+        const root = try stream.root();
 
-            while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
-                const swh = util.Swhash(2);
-                switch (swh.match(match.key)) {
-                    swh.case("t") => {
-                        name = try match.value.optionalStringBuffer(&name_buf);
-                    },
-                    swh.case("s") => {
-                        if (try match.value.optionalNumber(u32)) |seq| {
-                            self.heartbeat_seq = seq;
-                            std.debug.print("seq = {}\n", .{self.heartbeat_seq});
-                        }
-                    },
-                    swh.case("op") => {
-                        op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
-                    },
-                    swh.case("d") => {
-                        switch (op orelse return error.DataBeforeOp) {
-                            .dispatch => {
-                                try handler.handleDispatch(
-                                    ctx,
-                                    name orelse return error.DispatchWithoutName,
-                                    match.value,
-                                );
-                            },
-                            else => {
-                                _ = try match.value.finalizeToken();
-                            },
-                        }
-                    },
-                    else => unreachable,
-                }
+        while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
+            const swh = util.Swhash(2);
+            switch (swh.match(match.key)) {
+                swh.case("t") => {
+                    name = try match.value.optionalStringBuffer(&name_buf);
+                },
+                swh.case("s") => {
+                    if (try match.value.optionalNumber(u32)) |seq| {
+                        self.heartbeat_seq = seq;
+                    }
+                },
+                swh.case("op") => {
+                    op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
+                },
+                swh.case("d") => {
+                    switch (op orelse return error.DataBeforeOp) {
+                        .dispatch => {
+                            std.debug.print(">> {} -- {}\n", .{ self.heartbeat_seq, name });
+                            try handler.handleDispatch(
+                                ctx,
+                                name orelse return error.DispatchWithoutName,
+                                match.value,
+                            );
+                        },
+                        else => {
+                            _ = try match.value.finalizeToken();
+                        },
+                    }
+                },
+                else => unreachable,
             }
         }
     }
