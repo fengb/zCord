@@ -296,7 +296,7 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const context = try Context.init(
         &gpa.allocator,
-        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("AUTH") orelse return error.AuthNotFound}),
+        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound}),
         std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound,
         std.os.getenv("GITHUB_AUTH"),
     );
