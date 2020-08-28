@@ -368,6 +368,7 @@ pub fn main() !void {
             context.allocator,
             context.auth_token,
         );
+        defer discord_ws.deinit();
 
         context.connect_time = std.time.milliTimestamp();
 
@@ -456,6 +457,7 @@ const DiscordWs = struct {
 
     heartbeat_interval: usize,
     heartbeat_seq: ?usize,
+    heartbeat_die: bool,
     heartbeat_thread: *std.Thread,
 
     const Opcode = enum {
@@ -517,6 +519,7 @@ const DiscordWs = struct {
             std.debug.assert(event == .header);
         }
 
+        result.heartbeat_die = false;
         result.heartbeat_interval = 0;
         if (try result.client.readEvent()) |event| {
             std.debug.assert(event == .chunk);
@@ -578,8 +581,9 @@ const DiscordWs = struct {
 
     pub fn deinit(self: *DiscordWs) void {
         self.ssl_tunnel.deinit();
-        self.client.close();
-        self.* = undefined;
+
+        self.heartbeat_die = true;
+        self.heartbeat_thread.wait();
         self.allocator.destroy(self);
     }
 
@@ -667,7 +671,13 @@ const DiscordWs = struct {
 
     fn heartbeatHandler(self: *DiscordWs) void {
         while (true) {
-            std.time.sleep(self.heartbeat_interval * 1_000_000);
+            var i = self.heartbeat_interval;
+            while (i > 0) : (i -= 1) {
+                std.time.sleep(1_000_000);
+                if (self.heartbeat_die) {
+                    return;
+                }
+            }
 
             var retries: usize = 3;
             while (self.printMessage(
