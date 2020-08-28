@@ -68,11 +68,30 @@ const Escape = struct {
     }
 };
 
+const Time = struct {
+    millis: i64,
+
+    pub fn wrap(millis: i64) Time {
+        return .{ .millis = millis };
+    }
+
+    pub fn format(self: Time, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        const hours = std.math.absCast(@divFloor(self.millis, std.time.ms_per_hour));
+        const mins = std.math.absCast(@mod(@divFloor(self.millis, std.time.ms_per_min), 60));
+        const secs = std.math.absCast(@mod(@divFloor(self.millis, std.time.ms_per_s), 60));
+        const mill = std.math.absCast(@mod(self.millis, 1000));
+        return std.fmt.format(writer, "{: <4}:{:0<2}:{:0<2}.{:0<3}", .{ hours, mins, secs, mill });
+    }
+};
+
 const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
     github_auth_token: ?[]const u8,
     prepared_anal: analBuddy.PrepareResult,
+
+    start_time: i64,
+    connect_time: i64,
 
     ask_mailbox: struct { ask: Buffer(0x100), channel_id: u64 },
     ask_mutex: std.Mutex,
@@ -87,6 +106,8 @@ const Context = struct {
         result.github_auth_token = github_auth_token;
         result.prepared_anal = try analBuddy.prepare(allocator, ziglib);
         errdefer analBuddy.dispose(&result.prepared_anal);
+
+        result.start_time = std.time.milliTimestamp();
 
         result.ask_mailbox = undefined;
         result.ask_mutex = .{};
@@ -140,6 +161,23 @@ const Context = struct {
                     \\!!!!`
                     \\```
                             }),
+            swh.case("uptime") => {
+                var buf: [0x1000]u8 = undefined;
+                const current = std.time.milliTimestamp();
+                return try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "",
+                    .body = std.fmt.bufPrint(
+                        &buf,
+                        \\```
+                        \\Uptime:    {}
+                        \\Connected: {}
+                        \\```
+                    ,
+                        .{ Time.wrap(current - self.start_time), Time.wrap(current - self.connect_time) },
+                    ) catch unreachable,
+                });
+            },
             swh.case("zen") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "For Great Justice",
@@ -325,12 +363,14 @@ pub fn main() !void {
         std.os.getenv("GITHUB_AUTH"),
     );
 
-    var discord_ws = try DiscordWs.init(
-        context.allocator,
-        context.auth_token,
-    );
-
     while (true) {
+        var discord_ws = try DiscordWs.init(
+            context.allocator,
+            context.auth_token,
+        );
+
+        context.connect_time = std.time.milliTimestamp();
+
         discord_ws.run(context, struct {
             fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
                 if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
