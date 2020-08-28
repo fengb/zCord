@@ -330,78 +330,79 @@ pub fn main() !void {
         context.auth_token,
     );
 
-    discord_ws.run(context, struct {
-        fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
-            if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
+    while (true) {
+        discord_ws.run(context, struct {
+            fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
+                if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-            var ask: Buffer(0x100) = .{};
-            var channel_id: ?u64 = null;
+                var ask: Buffer(0x100) = .{};
+                var channel_id: ?u64 = null;
 
-            while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
-                const swh = util.Swhash(16);
-                switch (swh.match(match.key)) {
-                    swh.case("content") => {
-                        var reader = try match.value.stringReader();
-                        ask = try findAsk(reader);
+                while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
+                    const swh = util.Swhash(16);
+                    switch (swh.match(match.key)) {
+                        swh.case("content") => {
+                            var reader = try match.value.stringReader();
+                            ask = try findAsk(reader);
 
-                        // Throw away the rest of this reader
-                        // TODO: push this into finalizeToken (?)
-                        var buf: [0x100]u8 = undefined;
-                        while ((try reader.read(&buf)) != 0) {}
-                    },
-                    swh.case("channel_id") => {
-                        var buf: [0x100]u8 = undefined;
-                        const channel_string = try match.value.stringBuffer(&buf);
-                        channel_id = try std.fmt.parseInt(u64, channel_string, 10);
-                    },
-                    else => unreachable,
+                            // Throw away the rest of this reader
+                            // TODO: push this into finalizeToken (?)
+                            var buf: [0x100]u8 = undefined;
+                            while ((try reader.read(&buf)) != 0) {}
+                        },
+                        swh.case("channel_id") => {
+                            var buf: [0x100]u8 = undefined;
+                            const channel_string = try match.value.stringBuffer(&buf);
+                            channel_id = try std.fmt.parseInt(u64, channel_string, 10);
+                        },
+                        else => unreachable,
+                    }
+                }
+
+                if (ask.len > 0 and channel_id != null) {
+                    ctx.makeAskRequest(channel_id.?, ask);
                 }
             }
 
-            if (ask.len > 0 and channel_id != null) {
-                ctx.makeAskRequest(channel_id.?, ask);
-            }
-        }
+            fn findAsk(reader: anytype) !Buffer(0x100) {
+                const State = enum {
+                    no_match,
+                    percent,
+                    ready,
+                };
+                var state = State.no_match;
+                var buffer: Buffer(0x100) = .{};
 
-        fn findAsk(reader: anytype) !Buffer(0x100) {
-            const State = enum {
-                no_match,
-                percent,
-                ready,
-            };
-            var state = State.no_match;
-            var buffer: Buffer(0x100) = .{};
-
-            while (reader.readByte()) |c| {
-                switch (state) {
-                    .no_match => {
-                        if (c == '%') {
-                            state = .percent;
-                        }
-                    },
-                    .percent => {
-                        state = if (c == '%') .ready else .no_match;
-                    },
-                    .ready => {
-                        switch (c) {
-                            ' ', ',', '\n', '\t' => return buffer,
-                            else => {
-                                buffer.data[buffer.len] = c;
-                                buffer.len += 1;
-                            },
-                        }
-                    },
+                while (reader.readByte()) |c| {
+                    switch (state) {
+                        .no_match => {
+                            if (c == '%') {
+                                state = .percent;
+                            }
+                        },
+                        .percent => {
+                            state = if (c == '%') .ready else .no_match;
+                        },
+                        .ready => {
+                            switch (c) {
+                                ' ', ',', '\n', '\t' => return buffer,
+                                else => {
+                                    buffer.data[buffer.len] = c;
+                                    buffer.len += 1;
+                                },
+                            }
+                        },
+                    }
+                } else |err| switch (err) {
+                    error.EndOfStream => return buffer,
+                    else => |e| return e,
                 }
-            } else |err| switch (err) {
-                error.EndOfStream => return buffer,
-                else => |e| return e,
             }
-        }
-    }) catch |err| {
-        @panic(@errorName(err));
-    };
-
-    @panic("Terminus");
+        }) catch |err| switch (err) {
+            error.ConnectionReset => continue,
+            else => @panic(@errorName(err)),
+        };
+    }
 }
 
 const DiscordWs = struct {
@@ -564,6 +565,7 @@ const DiscordWs = struct {
     }
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         const event = (try self.client.readEvent()) orelse return error.NoBody;
+        std.debug.assert(event == .chunk);
 
         var name_buf: [32]u8 = undefined;
         var name: ?[]u8 = null;
