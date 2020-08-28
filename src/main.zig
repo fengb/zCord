@@ -440,7 +440,8 @@ pub fn main() !void {
                 }
             }
         }) catch |err| switch (err) {
-            error.ConnectionReset => continue,
+            // TODO: investigate if IO localized enough. And possibly convert to ConnectionReset
+            error.ConnectionReset, error.IO => continue,
             else => @panic(@errorName(err)),
         };
     }
@@ -449,6 +450,7 @@ pub fn main() !void {
 const DiscordWs = struct {
     allocator: *std.mem.Allocator,
 
+    is_dying: bool,
     ssl_tunnel: *request.SslTunnel,
 
     client: wz.base.Client.Client(request.SslTunnel.Stream.DstInStream, request.SslTunnel.Stream.DstOutStream),
@@ -457,7 +459,7 @@ const DiscordWs = struct {
 
     heartbeat_interval: usize,
     heartbeat_seq: ?usize,
-    heartbeat_die: bool,
+    heartbeat_ack: bool,
     heartbeat_thread: *std.Thread,
 
     const Opcode = enum {
@@ -519,7 +521,7 @@ const DiscordWs = struct {
             std.debug.assert(event == .header);
         }
 
-        result.heartbeat_die = false;
+        result.is_dying = false;
         result.heartbeat_interval = 0;
         if (try result.client.readEvent()) |event| {
             std.debug.assert(event == .chunk);
@@ -574,15 +576,18 @@ const DiscordWs = struct {
         );
 
         result.heartbeat_seq = null;
+        result.heartbeat_ack = true;
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
         return result;
     }
 
     pub fn deinit(self: *DiscordWs) void {
-        self.ssl_tunnel.deinit();
+        if (!self.is_dying) {
+            self.is_dying = true;
+            self.ssl_tunnel.deinit();
+        }
 
-        self.heartbeat_die = true;
         self.heartbeat_thread.wait();
         self.allocator.destroy(self);
     }
@@ -643,6 +648,11 @@ const DiscordWs = struct {
                                 match.value,
                             );
                         },
+                        .heartbeat_ack => {
+                            std.debug.print("<3\n", .{});
+                            self.heartbeat_ack = true;
+                            _ = try match.value.finalizeToken();
+                        },
                         else => {
                             _ = try match.value.finalizeToken();
                         },
@@ -674,9 +684,15 @@ const DiscordWs = struct {
             var i = self.heartbeat_interval;
             while (i > 0) : (i -= 1) {
                 std.time.sleep(1_000_000);
-                if (self.heartbeat_die) {
+                if (self.is_dying) {
                     return;
                 }
+            }
+
+            if (!self.heartbeat_ack) {
+                self.is_dying = true;
+                self.ssl_tunnel.deinit();
+                return;
             }
 
             var retries: usize = 3;
@@ -686,6 +702,7 @@ const DiscordWs = struct {
                 \\   "d": {}
                 \\ }}
             , .{self.heartbeat_seq})) |_| {
+                self.heartbeat_ack = false;
                 break;
             } else |err| {
                 retries -= 1;
