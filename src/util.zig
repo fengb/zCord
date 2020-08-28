@@ -793,3 +793,35 @@ pub fn Swhash(comptime max_bytes: comptime_int) type {
         }
     };
 }
+
+pub fn Mailbox(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        value: T,
+        mutex: std.Mutex,
+
+        pub fn init() Self {
+            var result = Self{ .value = undefined, .mutex = std.Mutex{} };
+            // Manually lock this so get() is blocked
+            _ = result.mutex.acquire();
+            return result;
+        }
+
+        pub fn initWithValue(value: T) Self {
+            return .{ .value = value, .mutex = std.Mutex{} };
+        }
+
+        pub fn get(self: *Self) T {
+            _ = self.mutex.acquire();
+            // TODO: add a mutex around the result data?
+            return self.value;
+        }
+
+        pub fn putOverwrite(self: *Self, value: T) void {
+            const lock = self.mutex.tryAcquire() orelse std.Mutex.Held{ .mutex = &self.mutex };
+            self.value = value;
+            lock.release();
+        }
+    };
+}

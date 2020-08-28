@@ -45,9 +45,10 @@ const Context = struct {
     start_time: i64,
     connect_time: i64,
 
-    ask_mailbox: struct { ask: Buffer(0x100), channel_id: u64 },
-    ask_mutex: std.Mutex,
+    ask_mailbox: util.Mailbox(AskData),
     ask_thread: *std.Thread,
+
+    const AskData = struct { ask: Buffer(0x100), channel_id: u64 };
 
     pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8, github_auth_token: ?[]const u8) !*Context {
         const result = try allocator.create(Context);
@@ -61,30 +62,15 @@ const Context = struct {
 
         result.start_time = std.time.milliTimestamp();
 
-        result.ask_mailbox = undefined;
-        result.ask_mutex = .{};
-        // Manually lock this so the thread is blocked
-        _ = result.ask_mutex.acquire();
+        result.ask_mailbox = util.Mailbox(AskData).init();
         result.ask_thread = try std.Thread.spawn(result, askHandler);
 
         return result;
     }
 
-    pub fn makeAskRequest(self: *Context, channel_id: u64, ask: Buffer(0x100)) void {
-        self.ask_mailbox = .{ .ask = ask, .channel_id = channel_id };
-
-        // Either poke the free mutex, or immediately release a locked one
-        const lock = self.ask_mutex.tryAcquire() orelse std.Mutex.Held{ .mutex = &self.ask_mutex };
-        lock.release();
-    }
-
     pub fn askHandler(self: *Context) void {
         while (true) {
-            _ = self.ask_mutex.acquire();
-
-            // Explicitly copy this data to prevent concurrent alias bugs
-            // TODO: add a mutex?
-            var mailbox = self.ask_mailbox;
+            var mailbox = self.ask_mailbox.get();
             self.askOne(mailbox.channel_id, mailbox.ask.slice()) catch |err| {
                 std.debug.print("{}\n", .{err});
             };
@@ -354,7 +340,7 @@ pub fn main() !void {
 
                 if (ask.len > 0 and channel_id != null) {
                     std.debug.print(">> %%{}\n", .{ask.slice()});
-                    ctx.makeAskRequest(channel_id.?, ask);
+                    ctx.ask_mailbox.putOverwrite(.{ .channel_id = channel_id.?, .ask = ask });
                 }
             }
 
