@@ -4,6 +4,7 @@ const wz = @import("wz");
 const ssl = @import("zig-bearssl");
 const analBuddy = @import("analysis-buddy");
 
+const format = @import("format.zig");
 const request = @import("request.zig");
 const util = @import("util.zig");
 
@@ -34,55 +35,6 @@ fn Buffer(comptime max_len: usize) type {
         }
     };
 }
-
-const Escape = struct {
-    text: []const u8,
-
-    const Reserved = enum(u8) {
-        Quote = '"',
-        Newline = '\n',
-        Backslash = '\\',
-    };
-
-    pub fn wrap(text: []const u8) Escape {
-        return .{ .text = text };
-    }
-
-    pub fn format(self: Escape, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        var start: usize = 0;
-        for (self.text) |letter, i| {
-            const reserved = std.meta.intToEnum(Reserved, letter) catch continue;
-            if (start < i) {
-                try writer.writeAll(self.text[start..i]);
-            }
-            switch (reserved) {
-                .Quote => try writer.writeAll("\\\""),
-                .Newline => try writer.writeAll("\\n"),
-                .Backslash => try writer.writeAll("\\\\"),
-            }
-            start = i + 1;
-        }
-        if (start < self.text.len) {
-            try writer.writeAll(self.text[start..]);
-        }
-    }
-};
-
-const Time = struct {
-    millis: i64,
-
-    pub fn wrap(millis: i64) Time {
-        return .{ .millis = millis };
-    }
-
-    pub fn format(self: Time, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        const hours = std.math.absCast(@divFloor(self.millis, std.time.ms_per_hour));
-        const mins = std.math.absCast(@mod(@divFloor(self.millis, std.time.ms_per_min), 60));
-        const secs = std.math.absCast(@mod(@divFloor(self.millis, std.time.ms_per_s), 60));
-        const mill = std.math.absCast(@mod(self.millis, 1000));
-        return std.fmt.format(writer, "{: <4}:{:0<2}:{:0<2}.{:0<3}", .{ hours, mins, secs, mill });
-    }
-};
 
 const Context = struct {
     allocator: *std.mem.Allocator,
@@ -174,7 +126,7 @@ const Context = struct {
                         \\Connected: {}
                         \\```
                     ,
-                        .{ Time.wrap(current - self.start_time), Time.wrap(current - self.connect_time) },
+                        .{ format.time(@intCast(u64, current - self.start_time)), format.time(@intCast(u64, current - self.connect_time)) },
                     ) catch unreachable,
                 });
             },
@@ -281,7 +233,7 @@ const Context = struct {
             \\  }}
             \\}}
         ,
-            .{ Escape.wrap(args.title), Escape.wrap(args.body), @enumToInt(args.color) },
+            .{ format.jsonString(args.title), format.jsonString(args.body), @enumToInt(args.color) },
         );
 
         _ = try req.expectSuccessStatus();
@@ -572,7 +524,7 @@ const DiscordWs = struct {
             \\ }}
         ,
             .{
-                Escape.wrap(auth_token),
+                format.jsonString(auth_token),
                 @tagName(std.Target.current.os.tag),
                 agent,
             },
