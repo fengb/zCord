@@ -426,7 +426,9 @@ pub fn StreamJson(comptime Reader: type) type {
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
             ctx.parser.feed(byte, &token1, &token2) catch |err| {
-                ctx.debugDump(std.io.getStdErr().writer()) catch {};
+                if (debug_buffer) {
+                    ctx.debugDump(std.io.getStdErr().writer()) catch {};
+                }
                 return err;
             };
             return token1;
