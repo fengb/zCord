@@ -401,6 +401,7 @@ pub fn main() !void {
                 }
 
                 if (ask.len > 0 and channel_id != null) {
+                    std.debug.print(">> %%{}\n", .{ask.slice()});
                     ctx.makeAskRequest(channel_id.?, ask);
                 }
             }
@@ -444,6 +445,8 @@ pub fn main() !void {
             error.ConnectionReset, error.IO => continue,
             else => @panic(@errorName(err)),
         };
+
+        std.debug.print("Exited: {}\n", .{discord_ws.client});
     }
 }
 
@@ -641,7 +644,7 @@ const DiscordWs = struct {
                 swh.case("d") => {
                     switch (op orelse return error.DataBeforeOp) {
                         .dispatch => {
-                            std.debug.print(">> {} -- {}\n", .{ self.heartbeat_seq, name });
+                            std.debug.print("<< {} -- {}\n", .{ self.heartbeat_seq, name });
                             try handler.handleDispatch(
                                 ctx,
                                 name orelse return error.DispatchWithoutName,
@@ -649,7 +652,7 @@ const DiscordWs = struct {
                             );
                         },
                         .heartbeat_ack => {
-                            std.debug.print("<3\n", .{});
+                            std.debug.print("<< ♥\n", .{});
                             self.heartbeat_ack = true;
                             _ = try match.value.finalizeToken();
                         },
@@ -681,9 +684,10 @@ const DiscordWs = struct {
 
     fn heartbeatHandler(self: *DiscordWs) void {
         while (true) {
-            var i = self.heartbeat_interval;
-            while (i > 0) : (i -= 1) {
-                std.time.sleep(1_000_000);
+            const start = std.time.milliTimestamp();
+            // Buffer to fire early than late
+            while (std.time.milliTimestamp() - start < self.heartbeat_interval - 1000) {
+                std.time.sleep(std.time.ns_per_s);
                 if (self.is_dying) {
                     return;
                 }
@@ -702,6 +706,7 @@ const DiscordWs = struct {
                 \\   "d": {}
                 \\ }}
             , .{self.heartbeat_seq})) |_| {
+                std.debug.print(">> ♡\n", .{});
                 self.heartbeat_ack = false;
                 break;
             } else |err| {
