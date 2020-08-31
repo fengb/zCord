@@ -10,21 +10,6 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-pub usingnamespace if (std.builtin.mode != .Debug) struct {} else struct {
-    pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
-        std.debug.print("PANIC -- {}\n", .{msg});
-
-        const err = std.os.execveZ(
-            std.os.argv[0],
-            @ptrCast([*:null]?[*:0]u8, std.os.argv.ptr),
-            @ptrCast([*:null]?[*:0]u8, std.os.environ.ptr),
-        );
-
-        std.debug.print("{}\n", .{@errorName(err)});
-        std.os.exit(42);
-    }
-};
-
 fn Buffer(comptime max_len: usize) type {
     return struct {
         data: [max_len]u8 = undefined,
