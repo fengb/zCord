@@ -547,7 +547,10 @@ const DiscordWs = struct {
                 },
                 // Ping, Pong
                 9, 10 => {},
-                8 => return error.ConnectionReset,
+                8 => {
+                    std.debug.print("Websocket close frame. Reconnecting...\n", .{});
+                    return error.ConnectionReset;
+                },
                 2 => return error.WtfBinary,
                 else => return error.WtfWtf,
             }
@@ -632,6 +635,7 @@ const DiscordWs = struct {
             }
 
             if (!self.heartbeat_ack) {
+                std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
                 self.is_dying = true;
                 self.ssl_tunnel.deinit();
                 return;
