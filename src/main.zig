@@ -28,7 +28,6 @@ const Context = struct {
     prepared_anal: analBuddy.PrepareResult,
 
     start_time: i64,
-    connect_time: i64,
 
     ask_mailbox: util.Mailbox(AskData),
     ask_thread: *std.Thread,
@@ -93,11 +92,10 @@ const Context = struct {
                     .body = std.fmt.bufPrint(
                         &buf,
                         \\```
-                        \\Uptime:    {}
-                        \\Connected: {}
+                        \\Uptime:      {}
                         \\```
                     ,
-                        .{ format.time(@intCast(u64, current - self.start_time)), format.time(@intCast(u64, current - self.connect_time)) },
+                        .{format.time(current - self.start_time)},
                     ) catch unreachable,
                 });
             },
@@ -292,8 +290,6 @@ pub fn main() !void {
             context.auth_token,
         );
         defer discord_ws.deinit();
-
-        context.connect_time = std.time.milliTimestamp();
 
         discord_ws.run(context, struct {
             fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {

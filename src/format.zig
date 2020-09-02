@@ -3,7 +3,6 @@ const std = @import("std");
 pub fn jsonString(text: []const u8) JsonString {
     return .{ .text = text };
 }
-
 pub const JsonString = struct {
     text: []const u8,
 
@@ -33,17 +32,17 @@ pub const JsonString = struct {
     }
 };
 
-pub fn time(millis: u64) Time {
+pub fn time(millis: i64) Time {
     return .{ .millis = millis };
 }
 const Time = struct {
-    millis: u64,
+    millis: i64,
 
     pub fn format(self: Time, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        const hours = self.millis / std.time.ms_per_hour;
-        const mins = (self.millis / std.time.ms_per_min) % 60;
-        const secs = (self.millis / std.time.ms_per_s) % 60;
-        const mill = self.millis % 1000;
-        return std.fmt.format(writer, "{: <4}:{:0<2}:{:0<2}.{:0<3}", .{ hours, mins, secs, mill });
+        const hours = @divFloor(self.millis, std.time.ms_per_hour);
+        const mins = @intCast(u8, @mod(@divFloor(self.millis, std.time.ms_per_min), 60));
+        const secs = @intCast(u8, @mod(@divFloor(self.millis, std.time.ms_per_s), 60));
+        const mill = @intCast(u16, @mod(self.millis, 1000));
+        return std.fmt.format(writer, "{}:{:0<2}:{:0<2}.{:0<3}", .{ hours, mins, secs, mill });
     }
 };
