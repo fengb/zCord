@@ -91,7 +91,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
                 self.ctx.assertState(.{ .TrueLiteral1, .FalseLiteral1 });
 
-                switch (try self.finalizeToken()) {
+                switch ((try self.finalizeToken()).?) {
                     .True => return true,
                     .False => return false,
                     else => unreachable,
@@ -314,7 +314,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                 if (!string_complete) {
                     const token = try self.finalizeToken();
-                    std.debug.assert(token == .String);
+                    std.debug.assert(token.? == .String);
                 }
                 return null;
             }
@@ -327,13 +327,23 @@ pub fn StreamJson(comptime Reader: type) type {
                 return true;
             }
 
-            pub fn finalizeToken(self: Element) Error!std_json.Token {
+            pub fn finalizeToken(self: Element) Error!?std_json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
                         std.debug.assert(self.element_number == self.ctx.element_number);
+
+                        switch (self.ctx.parser.state) {
+                            .ValueEnd, .TopLevelEnd, .ValueBeginNoClosing => return null,
+                            else => {},
+                        }
                     },
                     .Array, .Object => {
-                        std.debug.assert(self.ctx.parser.stack_used >= self.stack_level);
+                        if (self.ctx.parser.stack_used == self.stack_level - 1) {
+                            // Assert the parser state
+                            return null;
+                        } else {
+                            std.debug.assert(self.ctx.parser.stack_used >= self.stack_level);
+                        }
                     },
                 }
 
@@ -769,6 +779,64 @@ test "smoke" {
     try expectValidParseOutput(
         \\[[], [], [[]], [[""], [], [[], 0], null], false]
     );
+}
+
+test "finalizeToken on object" {
+    var fbs = std.io.fixedBufferStream("{}");
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Object);
+
+    expectEqual(try root.finalizeToken(), .ObjectEnd);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+}
+
+test "finalizeToken on string" {
+    var fbs = std.io.fixedBufferStream(
+        \\"foo"
+    );
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .String);
+
+    std.testing.expect((try root.finalizeToken()).? == .String);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+    expectEqual(try root.finalizeToken(), null);
+}
+
+test "finalizeToken on number" {
+    var fbs = std.io.fixedBufferStream("[[1234,5678]]");
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Array);
+
+    const inner = (try root.arrayNext()).?;
+    expectEqual(inner.kind, .Array);
+
+    const first = (try inner.arrayNext()).?;
+    expectEqual(first.kind, .Number);
+    std.testing.expect((try first.finalizeToken()).? == .Number);
+    expectEqual(try first.finalizeToken(), null);
+    expectEqual(try first.finalizeToken(), null);
+    expectEqual(try first.finalizeToken(), null);
+    expectEqual(try first.finalizeToken(), null);
+
+    const second = (try inner.arrayNext()).?;
+    expectEqual(second.kind, .Number);
+    std.testing.expect((try second.finalizeToken()).? == .Number);
+    expectEqual(try second.finalizeToken(), null);
+    expectEqual(try second.finalizeToken(), null);
+    expectEqual(try second.finalizeToken(), null);
 }
 /// Super simple "perfect hash" algorithm
 /// Only really useful for switching on strings

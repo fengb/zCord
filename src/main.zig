@@ -306,13 +306,8 @@ pub fn main() !void {
                     const swh = util.Swhash(16);
                     switch (swh.match(match.key)) {
                         swh.case("content") => {
-                            var reader = try match.value.stringReader();
-                            ask = try findAsk(reader);
-
-                            // Throw away the rest of this reader
-                            // TODO: push this into finalizeToken (?)
-                            var buf: [0x100]u8 = undefined;
-                            while ((try reader.read(&buf)) != 0) {}
+                            ask = try findAsk(try match.value.stringReader());
+                            _ = try match.value.finalizeToken();
                         },
                         swh.case("channel_id") => {
                             var buf: [0x100]u8 = undefined;
@@ -580,12 +575,10 @@ const DiscordWs = struct {
                         .heartbeat_ack => {
                             std.debug.print("<< ♥\n", .{});
                             self.heartbeat_ack = true;
-                            _ = try match.value.finalizeToken();
                         },
-                        else => {
-                            _ = try match.value.finalizeToken();
-                        },
+                        else => {},
                     }
+                    _ = try match.value.finalizeToken();
                 },
                 else => unreachable,
             }
