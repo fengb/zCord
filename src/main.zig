@@ -146,6 +146,11 @@ const Context = struct {
                 .title = "Zig's billion dollar mistake™",
                 .description = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
             }),
+            swh.case("tater[1]") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "",
+                .image = "https://live.staticflickr.com/82/210946443_8456e133fa_b.jpg",
+            }),
             swh.case("5076") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .color = .green,
