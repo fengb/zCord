@@ -67,7 +67,7 @@ const Context = struct {
             swh.case("ping") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "pong",
-                .body =
+                .description =
                     \\```
                     \\          ,;;;!!!!!;;.
                     \\        :!!!!!!!!!!!!!!;
@@ -89,7 +89,7 @@ const Context = struct {
                 return try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = "",
-                    .body = std.fmt.bufPrint(
+                    .description = std.fmt.bufPrint(
                         &buf,
                         \\```
                         \\Uptime:      {}
@@ -102,7 +102,7 @@ const Context = struct {
             swh.case("zen") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "For Great Justice",
-                .body =
+                .description =
                     \\```
                     \\∗ Communicate intent precisely.
                     \\∗ Edge cases matter.
@@ -124,18 +124,18 @@ const Context = struct {
             => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "bruh",
-                .body = "",
+                .description = "",
             }),
             swh.case("u0") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "Zig's billion dollar mistake™",
-                .body = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
+                .description = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
             }),
             swh.case("5076") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .color = .green,
                 .title = "Issue #5076 — syntax: drop the `const` keyword in global scopes",
-                .body =
+                .description =
                     \\~~https://github.com/ziglang/zig/issues/5076~~
                     \\https://www.youtube.com/watch?v=880uR25pP5U
                             }),
@@ -159,7 +159,7 @@ const Context = struct {
             try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = title,
-                .body = gh_issue.url.slice(),
+                .description = gh_issue.url.slice(),
                 .color = if (is_pull_request) HexColor.blue else HexColor.green,
             });
         } else |_| {
@@ -170,7 +170,7 @@ const Context = struct {
                 try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = ask,
-                    .body = std.mem.trim(u8, match, " \t\r\n"),
+                    .description = std.mem.trim(u8, match, " \t\r\n"),
                     .color = .red,
                 });
             } else {}
@@ -181,7 +181,7 @@ const Context = struct {
         channel_id: u64,
         title: []const u8,
         color: HexColor = HexColor.black,
-        body: ?[]const u8 = null,
+        description: ?[]const u8 = null,
         image: ?[]const u8 = null,
     }) !void {
         var path: [0x100]u8 = undefined;
@@ -198,19 +198,32 @@ const Context = struct {
         try req.client.writeHeaderValue("Content-Type", "application/json");
         try req.client.writeHeaderValue("Authorization", self.auth_token);
 
-        var fifo = std.fifo.LinearFifo(u8, .{ .Static = 0x1000 }).init();
-        if (args.body) |body| {
-            try fifo.writer().print(
-                \\"description": "{}",
-            , .{format.jsonString(body)});
-        }
-        if (args.image) |image| {
-            try fifo.writer().print(
-                \\"image": {{
-                \\    "url": "{}"
-                \\}},
-            , .{format.jsonString(image)});
-        }
+        const Body = struct {
+            description: ?[]const u8,
+            image: ?[]const u8,
+
+            pub fn format(
+                body: @This(),
+                comptime fmt: []const u8,
+                options: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                if (body.description) |description| {
+                    try writer.print(
+                        \\"description": "{}",
+                    , .{format.jsonString(description)});
+                }
+                if (body.image) |image| {
+                    try writer.print(
+                        \\"image": {{
+                        \\    "url": "{}"
+                        \\}},
+                    , .{format.jsonString(image)});
+                }
+            }
+        };
+
+        const body = Body{ .description = args.description, .image = args.image };
 
         try req.printSend(
             \\{{
@@ -223,7 +236,11 @@ const Context = struct {
             \\  }}
             \\}}
         ,
-            .{ format.jsonString(args.title), fifo.readableSlice(0), @enumToInt(args.color) },
+            .{
+                format.jsonString(args.title),
+                body,
+                @enumToInt(args.color),
+            },
         );
 
         _ = try req.expectSuccessStatus();
