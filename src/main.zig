@@ -14,6 +14,12 @@ pub usingnamespace if (std.builtin.mode != .Debug) struct {} else struct {
     pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
         std.debug.print("PANIC -- {}\n", .{msg});
 
+        if (error_return_trace) |t| {
+            std.debug.dumpStackTrace(t.*);
+        }
+
+        std.debug.dumpCurrentStackTrace(@returnAddress());
+
         const err = std.os.execveZ(
             std.os.argv[0],
             @ptrCast([*:null]?[*:0]u8, std.os.argv.ptr),
