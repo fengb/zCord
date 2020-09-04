@@ -139,6 +139,12 @@ const Context = struct {
                     \\~~https://github.com/ziglang/zig/issues/5076~~
                     \\https://www.youtube.com/watch?v=880uR25pP5U
                             }),
+            swh.case("2.718"), swh.case("2.71828") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "",
+                .image = "https://camo.githubusercontent.com/7f0d955df2205a170bf1582105c319ec6b00ec5c/68747470733a2f2f692e696d67666c69702e636f6d2f34646d7978702e6a7067",
+            }),
+
             else => {},
         }
 
@@ -174,8 +180,9 @@ const Context = struct {
     pub fn sendDiscordMessage(self: Context, args: struct {
         channel_id: u64,
         title: []const u8,
-        body: []const u8,
         color: HexColor = HexColor.black,
+        body: ?[]const u8 = null,
+        image: ?[]const u8 = null,
     }) !void {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
@@ -191,18 +198,32 @@ const Context = struct {
         try req.client.writeHeaderValue("Content-Type", "application/json");
         try req.client.writeHeaderValue("Authorization", self.auth_token);
 
+        var fifo = std.fifo.LinearFifo(u8, .{ .Static = 0x1000 }).init();
+        if (args.body) |body| {
+            try fifo.writer().print(
+                \\"description": "{}",
+            , .{format.jsonString(body)});
+        }
+        if (args.image) |image| {
+            try fifo.writer().print(
+                \\"image": {{
+                \\    "url": "{}"
+                \\}},
+            , .{format.jsonString(image)});
+        }
+
         try req.printSend(
             \\{{
             \\  "content": "",
             \\  "tts": false,
             \\  "embed": {{
             \\    "title": "{0}",
-            \\    "description": "{1}",
+            \\    {1}
             \\    "color": {2}
             \\  }}
             \\}}
         ,
-            .{ format.jsonString(args.title), format.jsonString(args.body), @enumToInt(args.color) },
+            .{ format.jsonString(args.title), fifo.readableSlice(0), @enumToInt(args.color) },
         );
 
         _ = try req.expectSuccessStatus();
