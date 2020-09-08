@@ -10,7 +10,12 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-pub usingnamespace if (std.builtin.mode != .Debug) struct {} else struct {
+const auto_restart = true;
+//const auto_restart = std.builtin.mode == .Debug;
+
+pub usingnamespace if (auto_restart) RestartHandler else struct {};
+
+const RestartHandler = struct {
     pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
         std.debug.print("PANIC -- {}\n", .{msg});
 
