@@ -684,6 +684,8 @@ const DiscordWs = struct {
                 return;
             }
 
+            self.heartbeat_ack = false;
+
             var retries: usize = 3;
             while (self.printMessage(
                 \\ {{
@@ -692,7 +694,6 @@ const DiscordWs = struct {
                 \\ }}
             , .{self.heartbeat_seq})) |_| {
                 std.debug.print(">> ♡\n", .{});
-                self.heartbeat_ack = false;
                 break;
             } else |err| {
                 retries -= 1;
