@@ -51,6 +51,7 @@ const Context = struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
     github_auth_token: ?[]const u8,
+    prng: std.rand.DefaultPrng,
     prepared_anal: analBuddy.PrepareResult,
 
     start_time: i64,
@@ -67,6 +68,7 @@ const Context = struct {
         result.allocator = allocator;
         result.auth_token = auth_token;
         result.github_auth_token = github_auth_token;
+        result.prng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.timestamp()));
         result.prepared_anal = try analBuddy.prepare(allocator, ziglib);
         errdefer analBuddy.dispose(&result.prepared_anal);
 
@@ -80,12 +82,20 @@ const Context = struct {
 
     pub fn askHandler(self: *Context) void {
         while (true) {
-            var mailbox = self.ask_mailbox.get();
+            const mailbox = self.ask_mailbox.get();
             self.askOne(mailbox.channel_id, mailbox.ask.slice()) catch |err| {
                 std.debug.print("{}\n", .{err});
             };
         }
     }
+
+    const tater = [_][]const u8{
+        "https://user-images.githubusercontent.com/219422/92998997-14af2e80-f4e3-11ea-9693-9c14f0d3f779.jpg",
+        "https://user-images.githubusercontent.com/219422/93001705-ad9b7500-f4f6-11ea-92b0-ee3c0bda7611.jpg",
+        "https://live.staticflickr.com/82/210946443_8456e133fa_b.jpg",
+        "https://live.staticflickr.com/2491/3781228004_4dd9294e1e_k.jpg",
+        "https://pbs.twimg.com/media/EWNK2wZUcAEccAt?format=png",
+    };
 
     pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
         const swh = util.Swhash(16);
@@ -157,10 +167,15 @@ const Context = struct {
                 .title = "Zig's billion dollar mistake™",
                 .description = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
             }),
-            swh.case("tater[1]") => return try self.sendDiscordMessage(.{
+            swh.case("tater") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "",
-                .image = "https://live.staticflickr.com/82/210946443_8456e133fa_b.jpg",
+                .image = tater[self.prng.random.intRangeLessThan(usize, 0, tater.len)],
+            }),
+            swh.case("tater[0]")...swh.case("tater[" ++ &[1]u8{tater.len + '0' - 1} ++ "]") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "",
+                .image = tater[ask[6] - '0'],
             }),
             swh.case("5076") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -175,7 +190,11 @@ const Context = struct {
                 .title = "",
                 .image = "https://camo.githubusercontent.com/7f0d955df2205a170bf1582105c319ec6b00ec5c/68747470733a2f2f692e696d67666c69702e636f6d2f34646d7978702e6a7067",
             }),
-
+            swh.case("bruh") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "",
+                .image = "https://user-images.githubusercontent.com/106511/86198112-6718ba00-bb46-11ea-92fd-d006b462c5b1.jpg",
+            }),
             else => {},
         }
 
