@@ -185,6 +185,11 @@ const Context = struct {
                     \\~~https://github.com/ziglang/zig/issues/5076~~
                     \\https://www.youtube.com/watch?v=880uR25pP5U
                             }),
+            swh.case("submodule"), swh.case("submodules") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "git submodules are the devil — _andrewrk_",
+                .description = "https://github.com/ziglang/zig-bootstrap/issues/17#issuecomment-609980730",
+            }),
             swh.case("2.718"), swh.case("2.71828") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "",
