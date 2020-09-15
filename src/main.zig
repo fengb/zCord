@@ -89,14 +89,6 @@ const Context = struct {
         }
     }
 
-    const tater = [_][]const u8{
-        "https://user-images.githubusercontent.com/219422/92998997-14af2e80-f4e3-11ea-9693-9c14f0d3f779.jpg",
-        "https://user-images.githubusercontent.com/219422/93001705-ad9b7500-f4f6-11ea-92b0-ee3c0bda7611.jpg",
-        "https://live.staticflickr.com/82/210946443_8456e133fa_b.jpg",
-        "https://live.staticflickr.com/2491/3781228004_4dd9294e1e_k.jpg",
-        "https://pbs.twimg.com/media/EWNK2wZUcAEccAt?format=png",
-    };
-
     pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
         const swh = util.Swhash(16);
         switch (swh.match(ask)) {
@@ -170,12 +162,7 @@ const Context = struct {
             swh.case("tater") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "",
-                .image = tater[self.prng.random.intRangeLessThan(usize, 0, tater.len)],
-            }),
-            swh.case("tater[0]")...swh.case("tater[" ++ &[1]u8{tater.len + '0' - 1} ++ "]") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "",
-                .image = tater[ask[6] - '0'],
+                .image = "https://memegenerator.net/img/instances/41913604.jpg",
             }),
             swh.case("5076") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
