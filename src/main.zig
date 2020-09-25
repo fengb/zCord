@@ -96,21 +96,21 @@ const Context = struct {
                 .channel_id = channel_id,
                 .title = "pong",
                 .description =
-                    \\```
-                    \\          ,;;;!!!!!;;.
-                    \\        :!!!!!!!!!!!!!!;
-                    \\      :!!!!!!!!!!!!!!!!!;
-                    \\     ;!!!!!!!!!!!!!!!!!!!;
-                    \\    ;!!!!!!!!!!!!!!!!!!!!!
-                    \\    ;!!!!!!!!!!!!!!!!!!!!'
-                    \\    ;!!!!!!!!!!!!!!!!!!!'
-                    \\     :!!!!!!!!!!!!!!!!'
-                    \\      ,!!!!!!!!!!!!!''
-                    \\   ,;!!!''''''''''
-                    \\ .!!!!'
-                    \\!!!!`
-                    \\```
-                            }),
+                \\```
+                \\          ,;;;!!!!!;;.
+                \\        :!!!!!!!!!!!!!!;
+                \\      :!!!!!!!!!!!!!!!!!;
+                \\     ;!!!!!!!!!!!!!!!!!!!;
+                \\    ;!!!!!!!!!!!!!!!!!!!!!
+                \\    ;!!!!!!!!!!!!!!!!!!!!'
+                \\    ;!!!!!!!!!!!!!!!!!!!'
+                \\     :!!!!!!!!!!!!!!!!'
+                \\      ,!!!!!!!!!!!!!''
+                \\   ,;!!!''''''''''
+                \\ .!!!!'
+                \\!!!!`
+                \\```
+            }),
             swh.case("uptime") => {
                 var buf: [0x1000]u8 = undefined;
                 const current = std.time.milliTimestamp();
@@ -122,7 +122,7 @@ const Context = struct {
                         \\```
                         \\Uptime:      {}
                         \\```
-                    ,
+                        ,
                         .{format.time(current - self.start_time)},
                     ) catch unreachable,
                 });
@@ -131,21 +131,21 @@ const Context = struct {
                 .channel_id = channel_id,
                 .title = "For Great Justice",
                 .description =
-                    \\```
-                    \\∗ Communicate intent precisely.
-                    \\∗ Edge cases matter.
-                    \\∗ Favor reading code over writing code.
-                    \\∗ Only one obvious way to do things.
-                    \\∗ Runtime crashes are better than bugs.
-                    \\∗ Compile errors are better than runtime crashes.
-                    \\∗ Incremental improvements.
-                    \\∗ Avoid local maximums.
-                    \\∗ Reduce the amount one must remember.
-                    \\∗ Minimize energy spent on coding style.
-                    \\∗ Resource deallocation must succeed.
-                    \\∗ Together we serve end users.
-                    \\```
-                            }),
+                \\```
+                \\∗ Communicate intent precisely.
+                \\∗ Edge cases matter.
+                \\∗ Favor reading code over writing code.
+                \\∗ Only one obvious way to do things.
+                \\∗ Runtime crashes are better than bugs.
+                \\∗ Compile errors are better than runtime crashes.
+                \\∗ Incremental improvements.
+                \\∗ Avoid local maximums.
+                \\∗ Reduce the amount one must remember.
+                \\∗ Minimize energy spent on coding style.
+                \\∗ Resource deallocation must succeed.
+                \\∗ Together we serve end users.
+                \\```
+            }),
             swh.case("zenlang"),
             swh.case("v"),
             swh.case("vlang"),
@@ -169,9 +169,9 @@ const Context = struct {
                 .color = .green,
                 .title = "Issue #5076 — syntax: drop the `const` keyword in global scopes",
                 .description =
-                    \\~~https://github.com/ziglang/zig/issues/5076~~
-                    \\https://www.youtube.com/watch?v=880uR25pP5U
-                            }),
+                \\~~https://github.com/ziglang/zig/issues/5076~~
+                \\https://www.youtube.com/watch?v=880uR25pP5U
+            }),
             swh.case("submodule"), swh.case("submodules") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "git submodules are the devil — _andrewrk_",
@@ -277,7 +277,7 @@ const Context = struct {
             \\    "color": {2}
             \\  }}
             \\}}
-        ,
+            ,
             .{
                 format.jsonString(args.title),
                 body,
@@ -564,7 +564,7 @@ const DiscordWs = struct {
             \\     }}
             \\   }}
             \\ }}
-        ,
+            ,
             .{
                 format.jsonString(auth_token),
                 @tagName(std.Target.current.os.tag),
