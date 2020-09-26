@@ -43,6 +43,6 @@ const Time = struct {
         const mins = @intCast(u8, @mod(@divFloor(self.millis, std.time.ms_per_min), 60));
         const secs = @intCast(u8, @mod(@divFloor(self.millis, std.time.ms_per_s), 60));
         const mill = @intCast(u16, @mod(self.millis, 1000));
-        return std.fmt.format(writer, "{}:{:0<2}:{:0<2}.{:0<3}", .{ hours, mins, secs, mill });
+        return std.fmt.format(writer, "{}:{:0>2}:{:0>2}.{:0>3}", .{ hours, mins, secs, mill });
     }
 };
