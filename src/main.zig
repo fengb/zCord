@@ -580,12 +580,11 @@ const DiscordWs = struct {
     }
 
     pub fn deinit(self: *DiscordWs) void {
-        if (!self.is_dying) {
-            self.is_dying = true;
-            self.ssl_tunnel.deinit();
-        }
+        self.ssl_tunnel.deinit();
 
+        self.is_dying = true;
         self.heartbeat_thread.wait();
+
         self.allocator.destroy(self);
     }
 
@@ -677,6 +676,8 @@ const DiscordWs = struct {
         try self.ssl_tunnel.conn.flush();
     }
 
+    pub extern "c" fn shutdown(sockfd: std.os.fd_t, how: c_int) c_int;
+
     fn heartbeatHandler(self: *DiscordWs) void {
         while (true) {
             const start = std.time.milliTimestamp();
@@ -690,8 +691,11 @@ const DiscordWs = struct {
 
             if (!self.heartbeat_ack) {
                 std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
-                self.is_dying = true;
-                self.ssl_tunnel.deinit();
+                const SHUT_RDWR = 2;
+                const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
+                if (rc != 0) {
+                    std.debug.print("Shutdown failed: {}\n", .{std.c.getErrno(rc)});
+                }
                 return;
             }
 
