@@ -41,6 +41,13 @@ fn Buffer(comptime max_len: usize) type {
         data: [max_len]u8 = undefined,
         len: usize = 0,
 
+        fn initFrom(data: []const u8) @This() {
+            var result: @This() = undefined;
+            std.mem.copy(u8, &result.data, data);
+            result.len = data.len;
+            return result;
+        }
+
         fn slice(self: @This()) []const u8 {
             return self.data[0..self.len];
         }
@@ -164,12 +171,12 @@ const Context = struct {
                 .title = "",
                 .image = "https://memegenerator.net/img/instances/41913604.jpg",
             }),
-            swh.case("5076") => return try self.sendDiscordMessage(.{
+            swh.case("5076"), swh.case("ziglang/zig#5076") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .color = .green,
-                .title = "Issue #5076 — syntax: drop the `const` keyword in global scopes",
+                .title = "ziglang/zig — issue #5076",
                 .description =
-                \\~~https://github.com/ziglang/zig/issues/5076~~
+                \\~~[syntax: drop the `const` keyword in global scopes](https://github.com/ziglang/zig/issues/5076)~~
                 \\https://www.youtube.com/watch?v=880uR25pP5U
             }),
             swh.case("submodule"), swh.case("submodules") => return try self.sendDiscordMessage(.{
@@ -190,21 +197,25 @@ const Context = struct {
             else => {},
         }
 
-        if (std.fmt.parseInt(u32, ask, 10)) |issue| {
-            const gh_issue = try self.requestGithubIssue(issue);
+        if (try self.maybeGithubIssue(ask)) |issue| {
+            const is_pull_request = std.mem.indexOf(u8, issue.url.slice(), "/pull/") != null;
+            const label = if (is_pull_request) "pull" else "issue";
 
-            const is_pull_request = std.mem.indexOf(u8, gh_issue.url.slice(), "/pull/") != null;
-            const label = if (is_pull_request) "Pull" else "Issue";
-
-            var buf: [0x1000]u8 = undefined;
-            const title = try std.fmt.bufPrint(&buf, "{} #{} — {}", .{ label, gh_issue.number, gh_issue.title.slice() });
+            var title_buf: [0x1000]u8 = undefined;
+            const title = try std.fmt.bufPrint(&title_buf, "{} — {} #{}", .{
+                issue.repo.slice(),
+                label,
+                issue.number,
+            });
+            var desc_buf: [0x1000]u8 = undefined;
+            const description = try std.fmt.bufPrint(&desc_buf, "[{}]({})", .{ issue.title.slice(), issue.url.slice() });
             try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = title,
-                .description = gh_issue.url.slice(),
+                .description = description,
                 .color = if (is_pull_request) HexColor.blue else HexColor.green,
             });
-        } else |_| {
+        } else {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
             defer arena.deinit();
 
@@ -217,6 +228,19 @@ const Context = struct {
                 });
             } else {}
         }
+    }
+
+    fn maybeGithubIssue(self: Context, ask: []const u8) !?GithubIssue {
+        if (std.fmt.parseInt(u32, ask, 10)) |issue| {
+            return try self.requestGithubIssue("ziglang/zig", ask);
+        } else |_| {}
+
+        const slash = std.mem.indexOfScalar(u8, ask, '/') orelse return null;
+        const pound = std.mem.indexOfScalar(u8, ask, '#') orelse return null;
+
+        if (slash > pound) return null;
+
+        return try self.requestGithubIssue(ask[0..pound], ask[pound + 1 ..]);
     }
 
     pub fn sendDiscordMessage(self: Context, args: struct {
@@ -288,7 +312,7 @@ const Context = struct {
         _ = try req.expectSuccessStatus();
     }
 
-    const GithubIssue = struct { number: u32, title: Buffer(0x100), url: Buffer(0x100) };
+    const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x100), url: Buffer(0x100) };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
     const HexColor = enum(u24) {
         black = 0,
@@ -303,14 +327,14 @@ const Context = struct {
             return @intToEnum(HexColor, raw);
         }
     };
-    pub fn requestGithubIssue(self: Context, issue: u32) !GithubIssue {
+    pub fn requestGithubIssue(self: Context, repo: []const u8, issue: []const u8) !GithubIssue {
         var path: [0x100]u8 = undefined;
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../github-com-chain.pem"),
             .host = "api.github.com",
             .method = "GET",
-            .path = try std.fmt.bufPrint(&path, "/repos/ziglang/zig/issues/{}", .{issue}),
+            .path = try std.fmt.bufPrint(&path, "/repos/{}/issues/{}", .{ repo, issue }),
         });
         defer req.deinit();
 
@@ -329,10 +353,13 @@ const Context = struct {
         var stream = util.streamJson(body.reader());
         const root = try stream.root();
 
-        var result = GithubIssue{ .number = issue, .title = .{}, .url = .{} };
-        while (try root.objectMatchAny(&[_][]const u8{ "title", "html_url" })) |match| {
+        var result = GithubIssue{ .repo = Buffer(0x100).initFrom(repo), .number = 0, .title = .{}, .url = .{} };
+        while (try root.objectMatchAny(&[_][]const u8{ "number", "title", "html_url" })) |match| {
             const swh = util.Swhash(16);
             switch (swh.match(match.key)) {
+                swh.case("number") => {
+                    result.number = try match.value.number(u32);
+                },
                 swh.case("html_url") => {
                     const slice = try match.value.stringBuffer(&result.url.data);
                     result.url.len = slice.len;
@@ -344,7 +371,7 @@ const Context = struct {
                 else => unreachable,
             }
 
-            if (result.title.len > 0 and result.url.len > 0) {
+            if (result.number > 0 and result.title.len > 0 and result.url.len > 0) {
                 return result;
             }
         }
