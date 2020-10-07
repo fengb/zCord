@@ -180,6 +180,26 @@ pub fn StreamJson(comptime Reader: type) type {
                             if (try self.ctx.feed(byte)) |token| {
                                 std.debug.assert(token == .String);
                                 return i;
+                            } else if (byte == '\\') {
+                                const next = try self.ctx.nextByte();
+                                std.debug.assert((try self.ctx.feed(next)) == null);
+
+                                c.* = switch (next) {
+                                    '"' => '"',
+                                    '/' => '/',
+                                    '\\' => '\\',
+                                    'n' => '\n',
+                                    'r' => '\r',
+                                    't' => '\t',
+                                    'b' => 0x08, // backspace
+                                    'f' => 0x0C, // form feed
+                                    'u' => {
+                                        // TODO: handle unicode escapes
+                                        return error.InvalidEscapeCharacter;
+                                    },
+                                    // should have been handled by the internal parser
+                                    else => unreachable,
+                                };
                             } else {
                                 c.* = byte;
                             }
@@ -568,7 +588,21 @@ test "string" {
         const element = try stream.root();
         expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualSlices(u8, "hello world", try element.stringBuffer(&buffer));
+        std.testing.expectEqualStrings("hello world", try element.stringBuffer(&buffer));
+    }
+}
+
+test "string escapes" {
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"hello\nworld\t"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("hello\nworld\t", try element.stringBuffer(&buffer));
     }
 }
 
