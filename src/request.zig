@@ -126,15 +126,21 @@ pub const Https = struct {
             }
             switch (event.status.code) {
                 200...299 => return event.status.code,
-                100...199 => return error.Internal,
-                300...399 => return error.Redirect,
+
+                100...199 => return error.MiscInformation,
+
+                300...399 => return error.MiscRedirect,
+
                 400 => return error.InvalidRequest,
                 401 => return error.Unauthorized,
                 402 => return error.PaymentRequired,
                 403 => return error.Forbidden,
                 404 => return error.NotFound,
-                405...499 => return error.ClientError,
-                500...599 => return error.ServerError,
+                429 => return error.TooManyRequests,
+                405...428, 430...499 => return error.MiscClientError,
+
+                500 => return error.InternalServerError,
+                501...599 => return error.MiscServerError,
                 else => unreachable,
             }
         } else {

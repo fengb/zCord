@@ -264,22 +264,22 @@ const Context = struct {
         try req.client.writeHeaderValue("Content-Type", "application/json");
         try req.client.writeHeaderValue("Authorization", self.auth_token);
 
-        const Body = struct {
+        const Contents = struct {
             description: ?[]const u8,
             image: ?[]const u8,
 
             pub fn format(
-                body: @This(),
+                contents: @This(),
                 comptime fmt: []const u8,
                 options: std.fmt.FormatOptions,
                 writer: anytype,
             ) !void {
-                if (body.description) |description| {
+                if (contents.description) |description| {
                     try writer.print(
                         \\"description": "{}",
                     , .{format.jsonString(description)});
                 }
-                if (body.image) |image| {
+                if (contents.image) |image| {
                     try writer.print(
                         \\"image": {{
                         \\    "url": "{}"
@@ -289,8 +289,7 @@ const Context = struct {
             }
         };
 
-        const body = Body{ .description = args.description, .image = args.image };
-
+        const contents = Contents{ .description = args.description, .image = args.image };
         try req.printSend(
             \\{{
             \\  "content": "",
@@ -304,12 +303,30 @@ const Context = struct {
         ,
             .{
                 format.jsonString(args.title),
-                body,
+                contents,
                 @enumToInt(args.color),
             },
         );
 
-        _ = try req.expectSuccessStatus();
+        if (req.expectSuccessStatus()) |_| {
+            // Rudimentary rate limiting
+            std.time.sleep(std.time.ns_per_s);
+        } else |err| switch (err) {
+            error.TooManyRequests => {
+                try req.completeHeaders();
+
+                var body = req.body();
+                var stream = util.streamJson(body.reader());
+                const root = try stream.root();
+
+                if (try root.objectMatch("retry_after")) |match| {
+                    const sec = try match.value.number(f64);
+                    // Don't bother trying for awhile
+                    std.time.sleep(@floatToInt(u64, sec * std.time.ns_per_s));
+                }
+            },
+            else => return err,
+        }
     }
 
     const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x100), url: Buffer(0x100) };
