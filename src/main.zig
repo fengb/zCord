@@ -754,7 +754,7 @@ const DiscordWs = struct {
 
             self.heartbeat_ack = false;
 
-            var retries: usize = 3;
+            var retries: u6 = 0;
             while (self.printMessage(
                 \\ {{
                 \\   "op": 1,
@@ -764,13 +764,17 @@ const DiscordWs = struct {
                 std.debug.print(">> ♡\n", .{});
                 break;
             } else |err| {
-                retries -= 1;
-                if (retries == 0) {
-                    // TODO: handle this better
-                    @panic(@errorName(err));
+                if (retries < 3) {
+                    std.os.nanosleep(@as(u64, 1) << retries, 0);
+                    retries += 1;
+                } else {
+                    const SHUT_RDWR = 2;
+                    const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
+                    if (rc != 0) {
+                        std.debug.print("Shutdown failed: {}\n", .{std.c.getErrno(rc)});
+                    }
+                    return;
                 }
-
-                std.os.nanosleep(1, 0);
             }
         }
     }
