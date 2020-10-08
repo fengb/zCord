@@ -129,7 +129,7 @@ const Context = struct {
                         \\```
                         \\Uptime:      {}
                         \\```
-                        ,
+                    ,
                         .{format.time(current - self.start_time)},
                     ) catch unreachable,
                 });
@@ -301,7 +301,7 @@ const Context = struct {
             \\    "color": {2}
             \\  }}
             \\}}
-            ,
+        ,
             .{
                 format.jsonString(args.title),
                 body,
@@ -448,7 +448,7 @@ pub fn main() !void {
                         },
                         .ready => {
                             switch (c) {
-                                ' ', ',', '\n', '\t' => return buffer,
+                                ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => break,
                                 else => {
                                     buffer.data[buffer.len] = c;
                                     buffer.len += 1;
@@ -457,9 +457,18 @@ pub fn main() !void {
                         },
                     }
                 } else |err| switch (err) {
-                    error.EndOfStream => return buffer,
+                    error.EndOfStream => {},
                     else => |e| return e,
                 }
+
+                if (buffer.len > 0) {
+                    const last = buffer.data[buffer.len - 1];
+                    if (last == '.') {
+                        // Strip trailing period
+                        buffer.len -= 1;
+                    }
+                }
+                return buffer;
             }
         }) catch |err| switch (err) {
             // TODO: investigate if IO localized enough. And possibly convert to ConnectionReset
@@ -591,7 +600,7 @@ const DiscordWs = struct {
             \\     }}
             \\   }}
             \\ }}
-            ,
+        ,
             .{
                 format.jsonString(auth_token),
                 @tagName(std.Target.current.os.tag),
