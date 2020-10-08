@@ -51,6 +51,26 @@ fn Buffer(comptime max_len: usize) type {
         fn slice(self: @This()) []const u8 {
             return self.data[0..self.len];
         }
+
+        fn append(self: *@This(), char: u8) !void {
+            if (self.len >= max_len) {
+                return error.NoSpaceLeft;
+            }
+            self.data[self.len] = char;
+            self.len += 1;
+        }
+
+        fn last(self: @This()) ?u8 {
+            if (self.len > 0) {
+                return self.data[self.len - 1];
+            } else {
+                return null;
+            }
+        }
+
+        fn pop(self: *@This()) !u8 {
+            return self.last() orelse error.Empty;
+        }
     };
 }
 
@@ -485,10 +505,7 @@ pub fn main() !void {
                         .ready => {
                             switch (c) {
                                 ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => break,
-                                else => {
-                                    buffer.data[buffer.len] = c;
-                                    buffer.len += 1;
-                                },
+                                else => try buffer.append(c),
                             }
                         },
                     }
@@ -497,12 +514,9 @@ pub fn main() !void {
                     else => |e| return e,
                 }
 
-                if (buffer.len > 0) {
-                    const last = buffer.data[buffer.len - 1];
-                    if (last == '.') {
-                        // Strip trailing period
-                        buffer.len -= 1;
-                    }
+                // Strip trailing period
+                if (buffer.last() == @as(u8, '.')) {
+                    _ = buffer.pop() catch unreachable;
                 }
                 return buffer;
             }
