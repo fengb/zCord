@@ -118,19 +118,30 @@ const Context = struct {
                 \\!!!!`
                 \\```
             }),
-            swh.case("uptime") => {
-                var buf: [0x1000]u8 = undefined;
+            swh.case("status") => {
+                const rusage = std.os.getrusage(std.os.RUSAGE_SELF);
+                const cpu_sec = (rusage.utime.tv_sec + rusage.stime.tv_sec) * 1000;
+                const cpu_us = @divFloor(rusage.utime.tv_usec + rusage.stime.tv_usec, 1000);
+
                 const current = std.time.milliTimestamp();
+
+                var buf: [0x1000]u8 = undefined;
                 return try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = "",
                     .description = std.fmt.bufPrint(
                         &buf,
                         \\```
-                        \\Uptime:      {}
+                        \\Uptime:    {}
+                        \\CPU time:  {}
+                        \\Max RSS:      {Bi:.3}
                         \\```
                     ,
-                        .{format.time(current - self.start_time)},
+                        .{
+                            format.time(current - self.start_time),
+                            format.time(cpu_sec + cpu_us),
+                            @intCast(u64, rusage.maxrss),
+                        },
                     ) catch unreachable,
                 });
             },
