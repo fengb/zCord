@@ -408,11 +408,19 @@ pub fn main() !void {
         std.os.getenv("GITHUB_AUTH"),
     );
 
+    var reconnect_wait: u64 = 1;
     while (true) {
-        var discord_ws = try DiscordWs.init(
+        var discord_ws = DiscordWs.init(
             context.allocator,
             context.auth_token,
-        );
+        ) catch |err| {
+            std.debug.print("Connect error: {}\n", .{@errorName(err)});
+            std.time.sleep(reconnect_wait * std.time.ns_per_s);
+            reconnect_wait = std.math.min(reconnect_wait * 2, 30);
+            continue;
+        };
+        reconnect_wait = 1;
+
         defer discord_ws.deinit();
 
         discord_ws.run(context, struct {
