@@ -86,6 +86,9 @@ const Context = struct {
     ask_mailbox: util.Mailbox(AskData),
     ask_thread: *std.Thread,
 
+    // TODO move this to instance variable somehow?
+    var awaiting_enema = false;
+
     const AskData = struct { ask: Buffer(0x100), channel_id: u64 };
 
     pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8, github_auth_token: ?[]const u8) !*Context {
@@ -104,7 +107,17 @@ const Context = struct {
         result.ask_mailbox = util.Mailbox(AskData).init();
         result.ask_thread = try std.Thread.spawn(result, askHandler);
 
+        std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
+            .handler = winchHandler,
+            .sa_mask = 0,
+            .sa_flags = 0,
+        }, null);
+
         return result;
+    }
+
+    fn winchHandler(signum: c_int) callconv(.C) void {
+        awaiting_enema = true;
     }
 
     pub fn askHandler(self: *Context) void {
@@ -250,6 +263,10 @@ const Context = struct {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
             defer arena.deinit();
 
+            if (awaiting_enema) {
+                try analBuddy.reloadCached(&arena, self.prepared_anal.store.allocator, &self.prepared_anal);
+                awaiting_enema = false;
+            }
             if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
                 try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
