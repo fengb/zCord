@@ -654,11 +654,13 @@ const DiscordWs = struct {
         }
 
         // Identify
+        // Intents are (default unprivileged set - typing intents)
         try result.printMessage(
             \\ {{
             \\   "op": 2,
             \\   "d": {{
             \\     "compress": "false",
+            \\     "intents": 14077,
             \\     "token": "{0}",
             \\     "properties": {{
             \\       "$os": "{1}",
