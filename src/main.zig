@@ -659,7 +659,7 @@ const DiscordWs = struct {
             \\ {{
             \\   "op": 2,
             \\   "d": {{
-            \\     "compress": "false",
+            \\     "compress": false,
             \\     "intents": 14077,
             \\     "token": "{0}",
             \\     "properties": {{
