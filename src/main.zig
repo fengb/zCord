@@ -653,6 +653,8 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
+        @setEvalBranchQuota(2000);
+
         // Identify
         // Intents are (default unprivileged set - typing intents)
         try result.printMessage(
@@ -667,13 +669,13 @@ const DiscordWs = struct {
             \\       "$browser": "{2}",
             \\       "$device": "{2}"
             \\     }},
-            \\	   "presence": {{
-            \\	     "status": "online",
-            \\	     "activities": [{{
-            \\         "type": 0,
-            \\         "name": "%%666 or %%std.ArrayList"
-            \\	     }}]
-            \\	   }}
+            \\     "presence": {{
+            \\       "status": "online",
+            \\       "activities": [{{
+            \\          "type": 0,
+            \\          "name": "examples: %%666 or %%std.ArrayList"
+            \\       }}]
+            \\     }}
             \\   }}
             \\ }}
         ,
