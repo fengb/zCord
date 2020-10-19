@@ -107,16 +107,33 @@ const Context = struct {
         result.ask_mailbox = util.Mailbox(AskData).init();
         result.ask_thread = try std.Thread.spawn(result, askHandler);
 
-        std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
-            .handler = winchHandler,
-            .sa_mask = 0,
-            .sa_flags = 0,
-        }, null);
+        // TODO: resolve this discrepancy in Zig std
+        switch (std.builtin.os.tag) {
+            .macos => {
+                std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
+                    .handler = darwinWinchHandler,
+                    .sa_mask = 0,
+                    .sa_flags = 0,
+                }, null);
+            },
+            .linux => {
+                std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
+                    .sigaction = linuxWinchHandler,
+                    .mask = std.os.empty_sigset,
+                    .flags = 0,
+                }, null);
+            },
+            else => {},
+        }
 
         return result;
     }
 
-    fn winchHandler(signum: c_int) callconv(.C) void {
+    fn darwinWinchHandler(signum: c_int) callconv(.C) void {
+        awaiting_enema = true;
+    }
+
+    fn linuxWinchHandler(signum: i32, _siginfo: *std.os.siginfo_t, _something: ?*c_void) callconv(.C) void {
         awaiting_enema = true;
     }
 
