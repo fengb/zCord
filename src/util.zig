@@ -876,7 +876,7 @@ test "finalizeToken on number" {
 /// Only really useful for switching on strings
 // TODO: can we auto detect and promote the underlying type?
 pub fn Swhash(comptime max_bytes: comptime_int) type {
-    const T = std.meta.IntType(false, max_bytes * 8);
+    const T = std.meta.IntType(.unsigned, max_bytes * 8);
 
     return struct {
         pub fn match(string: []const u8) T {
