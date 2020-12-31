@@ -107,33 +107,22 @@ const Context = struct {
         result.ask_mailbox = util.Mailbox(AskData).init();
         result.ask_thread = try std.Thread.spawn(result, askHandler);
 
-        // TODO: resolve this discrepancy in Zig std
-        switch (std.builtin.os.tag) {
-            .macos => {
-                std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
-                    .handler = darwinWinchHandler,
-                    .sa_mask = 0,
-                    .sa_flags = 0,
-                }, null);
+        std.os.sigaction(
+            std.os.SIGWINCH,
+            &std.os.Sigaction{
+                .handler = .{
+                    .handler = winchHandler,
+                },
+                .mask = 0,
+                .flags = 0,
             },
-            .linux => {
-                std.os.sigaction(std.os.SIGWINCH, &std.os.Sigaction{
-                    .sigaction = linuxWinchHandler,
-                    .mask = std.os.empty_sigset,
-                    .flags = 0,
-                }, null);
-            },
-            else => {},
-        }
+            null,
+        );
 
         return result;
     }
 
-    fn darwinWinchHandler(signum: c_int) callconv(.C) void {
-        awaiting_enema = true;
-    }
-
-    fn linuxWinchHandler(signum: i32, _siginfo: *std.os.siginfo_t, _something: ?*c_void) callconv(.C) void {
+    fn winchHandler(signum: c_int) callconv(.C) void {
         awaiting_enema = true;
     }
 
@@ -743,6 +732,7 @@ const DiscordWs = struct {
             }
         }
     }
+
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         const event = (try self.client.readEvent()) orelse return error.NoBody;
         std.debug.assert(event == .chunk);
