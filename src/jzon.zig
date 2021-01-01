@@ -11,7 +11,12 @@ pub fn dump(writer: anytype, jzon: anytype) !void {
     }
 
     switch (@typeInfo(T)) {
-        .Int, .Float, .ComptimeInt, .ComptimeFloat, .Bool, .Null => try writer.print("{}", .{jzon}),
+        .Optional => {
+            if (jzon) |notnull| try dump(writer, notnull) else try writer.writeAll("null");
+        },
+        .Int, .Float, .ComptimeInt, .ComptimeFloat, .Bool, .Null => {
+            try writer.print("{}", .{jzon});
+        },
         .Struct => |s_info| {
             try writer.writeByte('{');
             inline for (s_info.fields) |field, i| {
@@ -102,5 +107,21 @@ test "strings" {
     try dump(fbs.writer(), .{ .foo = "bar\n" });
     std.testing.expectEqualStrings(
         \\{"foo":"bar\n"}
+    , fbs.getWritten());
+}
+
+test "optionals" {
+    const Optional = struct { foo: ?u8 };
+    var buf: [1 << 10]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try dump(fbs.writer(), Optional{ .foo = null });
+    std.testing.expectEqualStrings(
+        \\{"foo":null}
+    , fbs.getWritten());
+
+    fbs.reset();
+    try dump(fbs.writer(), Optional{ .foo = 0 });
+    std.testing.expectEqualStrings(
+        \\{"foo":0}
     , fbs.getWritten());
 }
