@@ -7,7 +7,8 @@
 	branch = patch-1
 [submodule "lib/wz"]
 	path = lib/wz
-	url = https://github.com/truemedian/wz
+	url = https://github.com/fengb/wz
+	branch = encode-return
 [submodule "lib/analysis-buddy"]
 	path = lib/analysis-buddy
 	url = https://github.com/alexnask/analysis-buddy.git

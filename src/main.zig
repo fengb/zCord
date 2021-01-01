@@ -715,19 +715,17 @@ const DiscordWs = struct {
             if (event != .header) continue;
 
             switch (event.header.opcode) {
-                // Text Frame
-                1 => {
+                .Text => {
                     self.processChunks(ctx, handler) catch |err| {
                         std.debug.print("Process chunks failed: {}\n", .{err});
                     };
                 },
-                // Ping, Pong
-                9, 10 => {},
-                8 => {
+                .Ping, .Pong => {},
+                .Close => {
                     std.debug.print("Websocket close frame. Reconnecting...\n", .{});
                     return error.ConnectionReset;
                 },
-                2 => return error.WtfBinary,
+                .Binary => return error.WtfBinary,
                 else => return error.WtfWtf,
             }
         }
@@ -789,11 +787,8 @@ const DiscordWs = struct {
         const held = self.write_mutex.acquire();
         defer held.release();
 
-        try self.client.writeMessageHeader(.{ .length = msg.len, .opcode = 1 });
-
-        var masked = std.mem.zeroes([0x1000]u8);
-        self.client.maskPayload(msg, &masked);
-        try self.client.writeMessagePayload(masked[0..msg.len]);
+        try self.client.writeMessageHeader(.{ .length = msg.len, .opcode = .Text });
+        try self.client.writeMessagePayload(msg);
 
         try self.ssl_tunnel.conn.flush();
     }
