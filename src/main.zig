@@ -114,7 +114,7 @@ const Context = struct {
                 .handler = .{
                     .handler = winchHandler,
                 },
-                .mask = 0,
+                .mask = std.os.empty_sigset,
                 .flags = 0,
             },
             null,
