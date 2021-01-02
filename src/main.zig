@@ -211,7 +211,6 @@ const Context = struct {
             => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "bruh",
-                .description = "",
             }),
             swh.case("u0") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -245,6 +244,12 @@ const Context = struct {
                 .channel_id = channel_id,
                 .title = "",
                 .image = "https://user-images.githubusercontent.com/106511/86198112-6718ba00-bb46-11ea-92fd-d006b462c5b1.jpg",
+            }),
+            swh.case("dab") => return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "I promised I would dab and say “bruh” — _andrewrk_",
+                .description = "https://vimeo.com/492676992",
+                .image = "https://i.vimeocdn.com/video/1018725604.jpg?mw=700&mh=1243&q=70",
             }),
             else => {},
         }
