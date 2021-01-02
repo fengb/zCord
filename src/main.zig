@@ -7,6 +7,7 @@ const analBuddy = @import("analysis-buddy");
 const format = @import("format.zig");
 const request = @import("request.zig");
 const util = @import("util.zig");
+const jzon = @import("jzon.zig");
 
 const agent = "zigbot9001/0.0.1";
 
@@ -319,49 +320,25 @@ const Context = struct {
         try req.client.writeHeaderValue("Content-Type", "application/json");
         try req.client.writeHeaderValue("Authorization", self.auth_token);
 
-        const Contents = struct {
-            description: ?[]const u8,
-            image: ?[]const u8,
+        // Zig has difficulty resolving these peer types
+        const image: ?struct { url: []const u8 } = if (args.image) |url|
+            .{ .url = url }
+        else
+            null;
 
-            pub fn format(
-                contents: @This(),
-                comptime fmt: []const u8,
-                options: std.fmt.FormatOptions,
-                writer: anytype,
-            ) !void {
-                if (contents.description) |description| {
-                    try writer.print(
-                        \\"description": "{}",
-                    , .{format.jsonString(description)});
-                }
-                if (contents.image) |image| {
-                    try writer.print(
-                        \\"image": {{
-                        \\    "url": "{}"
-                        \\}},
-                    , .{format.jsonString(image)});
-                }
-            }
+        const embed = .{
+            .title = args.title,
+            .color = @enumToInt(args.color),
+            .description = args.description,
+            .image = image,
         };
-
-        const contents = Contents{ .description = args.description, .image = args.image };
-        try req.printSend(
-            \\{{
-            \\  "content": "",
-            \\  "tts": false,
-            \\  "embed": {{
-            \\    "title": "{0}",
-            \\    {1}
-            \\    "color": {2}
-            \\  }}
-            \\}}
-        ,
-            .{
-                format.jsonString(args.title),
-                contents,
-                @enumToInt(args.color),
-            },
-        );
+        try req.printSend("{}", .{
+            jzon.format(.{
+                .content = "",
+                .tts = false,
+                .embed = embed,
+            }),
+        });
 
         if (req.expectSuccessStatus()) |_| {
             // Rudimentary rate limiting
@@ -660,38 +637,32 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
-        @setEvalBranchQuota(2000);
-
-        // Identify
-        // Intents are (default unprivileged set - typing intents)
-        try result.printMessage(
-            \\ {{
-            \\   "op": 2,
-            \\   "d": {{
-            \\     "compress": false,
-            \\     "intents": 14077,
-            \\     "token": "{0}",
-            \\     "properties": {{
-            \\       "$os": "{1}",
-            \\       "$browser": "{2}",
-            \\       "$device": "{2}"
-            \\     }},
-            \\     "presence": {{
-            \\       "status": "online",
-            \\       "activities": [{{
-            \\          "type": 0,
-            \\          "name": "examples: %%666 or %%std.ArrayList"
-            \\       }}]
-            \\     }}
-            \\   }}
-            \\ }}
-        ,
-            .{
-                format.jsonString(auth_token),
-                @tagName(std.Target.current.os.tag),
-                agent,
+        const data = .{
+            .compress = false,
+            .intents = 14077, // default unprivileged set - typing intents
+            .token = auth_token,
+            .properties = .{
+                .@"$os" = @tagName(std.Target.current.os.tag),
+                .@"$browser" = agent,
+                .@"$device" = agent,
             },
-        );
+            .presence = .{
+                .status = "online",
+                .activities = .{
+                    .{
+                        .@"type" = 0,
+                        .name = "examples: %%666 or %%std.ArrayList",
+                    },
+                },
+            },
+        };
+
+        try result.printMessage("{}", .{
+            jzon.format(.{
+                .op = @enumToInt(Opcode.identify),
+                .d = data,
+            }),
+        });
 
         result.heartbeat_seq = null;
         result.heartbeat_ack = true;
@@ -819,12 +790,12 @@ const DiscordWs = struct {
             self.heartbeat_ack = false;
 
             var retries: u6 = 0;
-            while (self.printMessage(
-                \\ {{
-                \\   "op": 1,
-                \\   "d": {}
-                \\ }}
-            , .{self.heartbeat_seq})) |_| {
+            while (self.printMessage("{}", .{
+                jzon.format(.{
+                    .op = @enumToInt(Opcode.heartbeat),
+                    .d = self.heartbeat_seq,
+                }),
+            })) |_| {
                 std.debug.print(">> ♡\n", .{});
                 break;
             } else |err| {
@@ -847,4 +818,5 @@ const DiscordWs = struct {
 test "" {
     _ = request;
     _ = util;
+    _ = jzon;
 }
