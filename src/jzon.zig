@@ -1,5 +1,8 @@
 const std = @import("std");
 
+pub const empty_object: struct {} = .{};
+pub const empty_array: std.meta.Tuple(&[0]type{}) = .{};
+
 pub fn dump(writer: anytype, jzon: anytype) !void {
     const T = @TypeOf(jzon);
 
@@ -18,19 +21,30 @@ pub fn dump(writer: anytype, jzon: anytype) !void {
             try writer.print("{}", .{jzon});
         },
         .Struct => |s_info| {
-            try writer.writeByte('{');
-            inline for (s_info.fields) |field, i| {
-                if (i != 0) {
-                    try writer.writeByte(',');
+            if (s_info.is_tuple) {
+                try writer.writeByte('[');
+                inline for (s_info.fields) |field, i| {
+                    if (i != 0) {
+                        try writer.writeByte(',');
+                    }
+                    try dump(writer, @field(jzon, field.name));
                 }
-                try writer.writeByte('"');
-                try writer.writeAll(field.name);
-                try writer.writeByte('"');
-                try writer.writeByte(':');
+                try writer.writeByte(']');
+            } else {
+                try writer.writeByte('{');
+                inline for (s_info.fields) |field, i| {
+                    if (i != 0) {
+                        try writer.writeByte(',');
+                    }
+                    try writer.writeByte('"');
+                    try writer.writeAll(field.name);
+                    try writer.writeByte('"');
+                    try writer.writeByte(':');
 
-                try dump(writer, @field(jzon, field.name));
+                    try dump(writer, @field(jzon, field.name));
+                }
+                try writer.writeByte('}');
             }
-            try writer.writeByte('}');
         },
         .Pointer => |ptr_info| {
             const text = std.mem.span(jzon);
@@ -85,7 +99,7 @@ pub fn format(arg: anytype) Format(@TypeOf(arg)) {
 test "basic" {
     var buf: [1 << 10]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    try dump(fbs.writer(), .{});
+    try dump(fbs.writer(), empty_object);
     std.testing.expectEqualStrings("{}", fbs.getWritten());
 
     fbs.reset();
@@ -93,6 +107,17 @@ test "basic" {
     std.testing.expectEqualStrings(
         \\{"foo":1,"bar":false,"baz":null}
     , fbs.getWritten());
+}
+
+test "arrays" {
+    var buf: [1 << 10]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try dump(fbs.writer(), empty_array);
+    std.testing.expectEqualStrings("[]", fbs.getWritten());
+
+    fbs.reset();
+    try dump(fbs.writer(), .{ 1, 2, 3 });
+    std.testing.expectEqualStrings("[1,2,3]", fbs.getWritten());
 }
 
 test "strings" {
