@@ -450,6 +450,7 @@ pub fn main() !void {
         var discord_ws = DiscordWs.init(
             context.allocator,
             context.auth_token,
+            DiscordWs.Intents{ .guild_messages = true },
         ) catch |err| {
             std.debug.print("Connect error: {}\n", .{@errorName(err)});
             std.time.sleep(reconnect_wait * std.time.ns_per_s);
@@ -576,7 +577,34 @@ const DiscordWs = struct {
         heartbeat_ack = 11,
     };
 
-    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8) !*DiscordWs {
+    const Intents = packed struct {
+        guilds: bool = false,
+        guild_members: bool = false,
+        guild_bans: bool = false,
+        guild_emojis: bool = false,
+        guild_integrations: bool = false,
+        guild_webhooks: bool = false,
+        guild_invites: bool = false,
+        guild_voice_states: bool = false,
+        guild_presences: bool = false,
+        guild_messages: bool = false,
+        guild_message_reactions: bool = false,
+        guild_message_typing: bool = false,
+        direct_messages: bool = false,
+        direct_message_reactions: bool = false,
+        direct_message_typing: bool = false,
+        _pad: bool = undefined,
+
+        fn toRaw(self: Intents) u16 {
+            return @bitCast(u16, self);
+        }
+
+        fn fromRaw(raw: u16) Intents {
+            return @bitCast(Intents, self);
+        }
+    };
+
+    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, intents: Intents) !*DiscordWs {
         const result = try allocator.create(DiscordWs);
         errdefer allocator.destroy(result);
         result.allocator = allocator;
@@ -644,7 +672,7 @@ const DiscordWs = struct {
 
         const data = .{
             .compress = false,
-            .intents = 14077, // default unprivileged set - typing intents
+            .intents = intents.toRaw(),
             .token = auth_token,
             .properties = .{
                 .@"$os" = @tagName(std.Target.current.os.tag),
