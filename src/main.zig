@@ -670,7 +670,7 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
-        const data = .{
+        try result.sendCommand(.identify, .{
             .compress = false,
             .intents = intents.toRaw(),
             .token = auth_token,
@@ -688,13 +688,6 @@ const DiscordWs = struct {
                     },
                 },
             },
-        };
-
-        try result.printMessage("{}", .{
-            jzon.format(.{
-                .op = @enumToInt(Opcode.identify),
-                .d = data,
-            }),
         });
 
         result.heartbeat_seq = null;
@@ -784,9 +777,14 @@ const DiscordWs = struct {
         }
     }
 
-    pub fn printMessage(self: *DiscordWs, comptime fmt: []const u8, args: anytype) !void {
+    pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {
         var buf: [0x1000]u8 = undefined;
-        const msg = try std.fmt.bufPrint(&buf, fmt, args);
+        const msg = try std.fmt.bufPrint(&buf, "{}", .{
+            jzon.format(.{
+                .op = @enumToInt(opcode),
+                .d = data,
+            }),
+        });
 
         const held = self.write_mutex.acquire();
         defer held.release();
@@ -823,12 +821,7 @@ const DiscordWs = struct {
             self.heartbeat_ack = false;
 
             var retries: u6 = 0;
-            while (self.printMessage("{}", .{
-                jzon.format(.{
-                    .op = @enumToInt(Opcode.heartbeat),
-                    .d = self.heartbeat_seq,
-                }),
-            })) |_| {
+            while (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
                 std.debug.print(">> ♡\n", .{});
                 break;
             } else |err| {
