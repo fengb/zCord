@@ -7,7 +7,6 @@ const analBuddy = @import("analysis-buddy");
 const format = @import("format.zig");
 const request = @import("request.zig");
 const util = @import("util.zig");
-const jzon = @import("jzon.zig");
 
 const agent = "zigbot9001/0.0.1";
 
@@ -338,7 +337,7 @@ const Context = struct {
             .image = image,
         };
         try req.printSend("{}", .{
-            jzon.format(.{
+            format.json(.{
                 .content = "",
                 .tts = false,
                 .embed = embed,
@@ -780,7 +779,7 @@ const DiscordWs = struct {
     pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {
         var buf: [0x1000]u8 = undefined;
         const msg = try std.fmt.bufPrint(&buf, "{}", .{
-            jzon.format(.{
+            format.json(.{
                 .op = @enumToInt(opcode),
                 .d = data,
             }),
@@ -844,5 +843,4 @@ const DiscordWs = struct {
 test "" {
     _ = request;
     _ = util;
-    _ = jzon;
 }

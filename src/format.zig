@@ -1,36 +1,19 @@
 const std = @import("std");
 
-pub fn jsonString(text: []const u8) JsonString {
-    return .{ .text = text };
-}
-pub const JsonString = struct {
-    text: []const u8,
+pub fn Json(comptime T: type) type {
+    return struct {
+        data: T,
 
-    const Reserved = enum(u8) {
-        Quote = '"',
-        Newline = '\n',
-        Backslash = '\\',
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            // TODO: convert stringify options
+            return std.json.stringify(self.data, .{}, writer);
+        }
     };
+}
 
-    pub fn format(self: JsonString, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        var start: usize = 0;
-        for (self.text) |letter, i| {
-            const reserved = std.meta.intToEnum(Reserved, letter) catch continue;
-            if (start < i) {
-                try writer.writeAll(self.text[start..i]);
-            }
-            switch (reserved) {
-                .Quote => try writer.writeAll("\\\""),
-                .Newline => try writer.writeAll("\\n"),
-                .Backslash => try writer.writeAll("\\\\"),
-            }
-            start = i + 1;
-        }
-        if (start < self.text.len) {
-            try writer.writeAll(self.text[start..]);
-        }
-    }
-};
+pub fn json(data: anytype) Json(@TypeOf(data)) {
+    return .{ .data = data };
+}
 
 pub fn time(millis: i64) Time {
     return .{ .millis = millis };
