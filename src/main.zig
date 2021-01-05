@@ -669,6 +669,11 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
+        const Activity = struct {
+            @"type": u8,
+            name: []const u8,
+        };
+
         try result.sendCommand(.identify, .{
             .compress = false,
             .intents = intents.toRaw(),
@@ -680,7 +685,7 @@ const DiscordWs = struct {
             },
             .presence = .{
                 .status = "online",
-                .activities = .{
+                .activities = &[_]Activity{
                     .{
                         .@"type" = 0,
                         .name = "examples: %%666 or %%std.ArrayList",
