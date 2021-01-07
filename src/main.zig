@@ -81,7 +81,7 @@ const Context = struct {
     prng: std.rand.DefaultPrng,
     prepared_anal: analBuddy.PrepareResult,
 
-    start_time: i64,
+    timer: std.time.Timer,
 
     ask_mailbox: util.Mailbox(AskData),
     ask_thread: *std.Thread,
@@ -102,7 +102,7 @@ const Context = struct {
         result.prepared_anal = try analBuddy.prepare(allocator, ziglib);
         errdefer analBuddy.dispose(&result.prepared_anal);
 
-        result.start_time = std.time.milliTimestamp();
+        result.timer = try std.time.Timer.start();
 
         result.ask_mailbox = util.Mailbox(AskData).init();
         result.ask_thread = try std.Thread.spawn(result, askHandler);
@@ -162,8 +162,6 @@ const Context = struct {
                 const cpu_sec = (rusage.utime.tv_sec + rusage.stime.tv_sec) * 1000;
                 const cpu_us = @divFloor(rusage.utime.tv_usec + rusage.stime.tv_usec, 1000);
 
-                const current = std.time.milliTimestamp();
-
                 var buf: [0x1000]u8 = undefined;
                 return try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
@@ -177,7 +175,7 @@ const Context = struct {
                         \\```
                     ,
                         .{
-                            format.time(current - self.start_time),
+                            format.time(@intCast(i64, self.timer.read() / std.time.ns_per_ms)),
                             format.time(cpu_sec + cpu_us),
                             @intCast(u64, rusage.maxrss),
                         },
