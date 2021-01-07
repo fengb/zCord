@@ -17,7 +17,7 @@ pub usingnamespace if (auto_restart) RestartHandler else struct {};
 
 const RestartHandler = struct {
     pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
-        std.debug.print("PANIC -- {}\n", .{msg});
+        std.debug.print("PANIC -- {s}\n", .{msg});
 
         if (error_return_trace) |t| {
             std.debug.dumpStackTrace(t.*);
@@ -31,7 +31,7 @@ const RestartHandler = struct {
             @ptrCast([*:null]?[*:0]u8, std.os.environ.ptr),
         );
 
-        std.debug.print("{}\n", .{@errorName(err)});
+        std.debug.print("{s}\n", .{@errorName(err)});
         std.os.exit(42);
     }
 };
@@ -130,7 +130,7 @@ const Context = struct {
         while (true) {
             const mailbox = self.ask_mailbox.get();
             self.askOne(mailbox.channel_id, mailbox.ask.slice()) catch |err| {
-                std.debug.print("{}\n", .{err});
+                std.debug.print("{s}\n", .{err});
             };
         }
     }
@@ -171,8 +171,8 @@ const Context = struct {
                     .description = std.fmt.bufPrint(
                         &buf,
                         \\```
-                        \\Uptime:    {}
-                        \\CPU time:  {}
+                        \\Uptime:    {s}
+                        \\CPU time:  {s}
                         \\Max RSS:      {Bi:.3}
                         \\```
                     ,
@@ -258,13 +258,13 @@ const Context = struct {
             const label = if (is_pull_request) "pull" else "issue";
 
             var title_buf: [0x1000]u8 = undefined;
-            const title = try std.fmt.bufPrint(&title_buf, "{} — {} #{}", .{
+            const title = try std.fmt.bufPrint(&title_buf, "{s} — {s} #{d}", .{
                 issue.repo.slice(),
                 label,
                 issue.number,
             });
             var desc_buf: [0x1000]u8 = undefined;
-            const description = try std.fmt.bufPrint(&desc_buf, "[{}]({})", .{ issue.title.slice(), issue.url.slice() });
+            const description = try std.fmt.bufPrint(&desc_buf, "[{s}]({s})", .{ issue.title.slice(), issue.url.slice() });
             try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = title,
@@ -387,7 +387,7 @@ const Context = struct {
             .pem = @embedFile("../github-com-chain.pem"),
             .host = "api.github.com",
             .method = "GET",
-            .path = try std.fmt.bufPrint(&path, "/repos/{}/issues/{}", .{ repo, issue }),
+            .path = try std.fmt.bufPrint(&path, "/repos/{s}/issues/{s}", .{ repo, issue }),
         });
         defer req.deinit();
 
@@ -439,7 +439,7 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const context = try Context.init(
         &gpa.allocator,
-        try std.fmt.bufPrint(&auth_buf, "Bot {}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound}),
+        try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound}),
         std.os.getenv("ZIGLIB") orelse return error.ZiglibNotFound,
         std.os.getenv("GITHUB_AUTH"),
     );
@@ -451,7 +451,7 @@ pub fn main() !void {
             context.auth_token,
             DiscordWs.Intents{ .guild_messages = true },
         ) catch |err| {
-            std.debug.print("Connect error: {}\n", .{@errorName(err)});
+            std.debug.print("Connect error: {s}\n", .{@errorName(err)});
             std.time.sleep(reconnect_wait * std.time.ns_per_s);
             reconnect_wait = std.math.min(reconnect_wait * 2, 30);
             continue;
@@ -484,7 +484,7 @@ pub fn main() !void {
                 }
 
                 if (ask.len > 0 and channel_id != null) {
-                    std.debug.print(">> %%{}\n", .{ask.slice()});
+                    std.debug.print(">> %%{s}\n", .{ask.slice()});
                     ctx.ask_mailbox.putOverwrite(.{ .channel_id = channel_id.?, .ask = ask });
                 }
             }
@@ -718,7 +718,7 @@ const DiscordWs = struct {
             switch (event.header.opcode) {
                 .Text => {
                     self.processChunks(ctx, handler) catch |err| {
-                        std.debug.print("Process chunks failed: {}\n", .{err});
+                        std.debug.print("Process chunks failed: {s}\n", .{err});
                     };
                 },
                 .Ping, .Pong => {},
@@ -761,7 +761,7 @@ const DiscordWs = struct {
                 swh.case("d") => {
                     switch (op orelse return error.DataBeforeOp) {
                         .dispatch => {
-                            std.debug.print("<< {} -- {}\n", .{ self.heartbeat_seq, name });
+                            std.debug.print("<< {d} -- {s}\n", .{ self.heartbeat_seq, name });
                             try handler.handleDispatch(
                                 ctx,
                                 name orelse return error.DispatchWithoutName,
@@ -783,7 +783,7 @@ const DiscordWs = struct {
 
     pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {
         var buf: [0x1000]u8 = undefined;
-        const msg = try std.fmt.bufPrint(&buf, "{}", .{
+        const msg = try std.fmt.bufPrint(&buf, "{s}", .{
             format.json(.{
                 .op = @enumToInt(opcode),
                 .d = data,
@@ -817,7 +817,7 @@ const DiscordWs = struct {
                 const SHUT_RDWR = 2;
                 const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
                 if (rc != 0) {
-                    std.debug.print("Shutdown failed: {}\n", .{std.c.getErrno(rc)});
+                    std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
                 }
                 return;
             }
@@ -836,7 +836,7 @@ const DiscordWs = struct {
                     const SHUT_RDWR = 2;
                     const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
                     if (rc != 0) {
-                        std.debug.print("Shutdown failed: {}\n", .{std.c.getErrno(rc)});
+                        std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
                     }
                     return;
                 }

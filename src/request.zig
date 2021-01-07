@@ -111,7 +111,7 @@ pub const Https = struct {
         var buf: [0x10]u8 = undefined;
         try self.client.writeHeaderValue(
             "Content-Length",
-            try std.fmt.bufPrint(&buf, "{}", .{std.fmt.count(fmt, args)}),
+            try std.fmt.bufPrint(&buf, "{d}", .{std.fmt.count(fmt, args)}),
         );
         try self.client.writeHeadComplete();
 
