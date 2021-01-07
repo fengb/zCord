@@ -413,7 +413,7 @@ pub fn StreamJson(comptime Reader: type) type {
                     return;
                 }
             }
-            ctx.assertFailure("Unexpected state: {}", .{ctx.parser.state});
+            ctx.assertFailure("Unexpected state: {s}", .{ctx.parser.state});
         }
 
         fn assertFailure(ctx: Stream, comptime fmt: []const u8, args: anytype) void {
