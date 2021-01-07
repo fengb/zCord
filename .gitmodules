@@ -11,5 +11,5 @@
 	branch = encode-return
 [submodule "lib/analysis-buddy"]
 	path = lib/analysis-buddy
-	url = https://github.com/alexnask/analysis-buddy.git
-	branch = master
+	url = https://github.com/fengb/analysis-buddy
+	branch = fix-shrink-reference
