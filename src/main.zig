@@ -316,7 +316,7 @@ const Context = struct {
             .pem = @embedFile("../discord-com-chain.pem"),
             .host = "discord.com",
             .method = "POST",
-            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{}/messages", .{args.channel_id}),
+            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{d}/messages", .{args.channel_id}),
         });
         defer req.deinit();
 
@@ -394,7 +394,7 @@ const Context = struct {
         try req.client.writeHeaderValue("Accept", "application/json");
         if (self.github_auth_token) |github_auth_token| {
             var auth_buf: [0x100]u8 = undefined;
-            const token = try std.fmt.bufPrint(&auth_buf, "token {}", .{github_auth_token});
+            const token = try std.fmt.bufPrint(&auth_buf, "token {s}", .{github_auth_token});
             try req.client.writeHeaderValue("Authorization", token);
         }
         try req.client.writeHeadComplete();
