@@ -527,6 +527,7 @@ pub fn main() !void {
         }) catch |err| switch (err) {
             // TODO: investigate if IO localized enough. And possibly convert to ConnectionReset
             error.ConnectionReset, error.IO => continue,
+            error.AuthenticationFailed => |e| return e,
             else => @panic(@errorName(err)),
         };
 
@@ -721,8 +722,64 @@ const DiscordWs = struct {
                 },
                 .Ping, .Pong => {},
                 .Close => {
-                    std.debug.print("Websocket close frame. Reconnecting...\n", .{});
-                    return error.ConnectionReset;
+                    const body = (try self.client.readEvent()) orelse {
+                        std.debug.print("Websocket close frame - {{}}: no reason provided. Reconnecting...\n", .{});
+                        return error.ConnectionReset;
+                    };
+
+                    const CloseEventCode = enum(u16) {
+                        UnknownError = 4000,
+                        UnknownOpcode = 4001,
+                        DecodeError = 4002,
+                        NotAuthenticated = 4003,
+                        AuthenticationFailed = 4004,
+                        AlreadyAuthenticated = 4005,
+                        InvalidSeq = 4007,
+                        RateLimited = 4008,
+                        SessionTimedOut = 4009,
+                        InvalidShard = 4010,
+                        ShardingRequired = 4011,
+                        InvalidApiVersion = 4012,
+                        InvalidIntents = 4013,
+                        DisallowedIntents = 4014,
+
+                        pub fn format(code: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                            try writer.print("{d}: {s}", .{ @enumToInt(code), @tagName(code) });
+                        }
+                    };
+
+                    const code_num = std.mem.readIntBig(u16, body.chunk.data[0..2]);
+                    const code = std.meta.intToEnum(CloseEventCode, std.mem.readIntBig(u16, body.chunk.data[0..2])) catch |err| switch (err) {
+                        error.InvalidEnumTag => {
+                            std.debug.print("Websocket close frame - {d}: unknown code. Reconnecting...\n", .{code_num});
+                            return error.ConnectionReset;
+                        },
+                    };
+
+                    switch (code) {
+                        .UnknownError, .SessionTimedOut => {
+                            std.debug.print("Websocket close frame - {}. Reconnecting...\n", .{code});
+                            return error.ConnectionReset;
+                        },
+
+                        // Most likely user error
+                        .AuthenticationFailed => return error.AuthenticationFailed,
+                        .AlreadyAuthenticated => return error.AlreadyAuthenticated,
+                        .DecodeError => return error.DecodeError,
+                        .UnknownOpcode => return error.UnknownOpcode,
+                        .RateLimited => return error.WoahNelly,
+                        .DisallowedIntents => return error.DisallowedIntents,
+
+                        // We don't support these yet
+                        .InvalidSeq => unreachable,
+                        .InvalidShard => unreachable,
+                        .ShardingRequired => unreachable,
+                        .InvalidApiVersion => unreachable,
+
+                        // This library fucked up
+                        .NotAuthenticated => unreachable,
+                        .InvalidIntents => unreachable,
+                    }
                 },
                 .Binary => return error.WtfBinary,
                 else => return error.WtfWtf,
