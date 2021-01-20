@@ -541,9 +541,9 @@ const DiscordWs = struct {
     is_dying: bool,
     ssl_tunnel: *request.SslTunnel,
 
-    client: wz.base.Client.Client(request.SslTunnel.Stream.DstInStream, request.SslTunnel.Stream.DstOutStream),
+    client: wz.base.Client.Client(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
     client_buffer: []u8,
-    write_mutex: std.Mutex,
+    write_mutex: std.Thread.Mutex,
 
     heartbeat_interval: usize,
     heartbeat_seq: ?usize,
@@ -621,8 +621,8 @@ const DiscordWs = struct {
 
         result.client = wz.base.Client.create(
             result.client_buffer,
-            result.ssl_tunnel.conn.inStream(),
-            result.ssl_tunnel.conn.outStream(),
+            result.ssl_tunnel.conn.reader(),
+            result.ssl_tunnel.conn.writer(),
         );
 
         // Handshake

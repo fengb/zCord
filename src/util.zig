@@ -896,34 +896,37 @@ pub fn Swhash(comptime max_bytes: comptime_int) type {
     };
 }
 
+fn ReturnOf(comptime func: anytype) type {
+    return @typeInfo(@TypeOf(func)).Fn.return_type.?;
+}
+
 pub fn Mailbox(comptime T: type) type {
     return struct {
         const Self = @This();
 
         value: T,
-        mutex: std.Mutex,
+        mutex: std.Thread.Mutex,
+        held: ?ReturnOf(std.Thread.Mutex.acquire),
 
         pub fn init() Self {
-            var result = Self{ .value = undefined, .mutex = std.Mutex{} };
+            var result = Self{ .value = undefined, .mutex = .{}, .held = null };
             // Manually lock this so get() is blocked
-            _ = result.mutex.acquire();
+            result.held = result.mutex.acquire();
             return result;
         }
 
-        pub fn initWithValue(value: T) Self {
-            return .{ .value = value, .mutex = std.Mutex{} };
-        }
-
         pub fn get(self: *Self) T {
-            _ = self.mutex.acquire();
+            self.held = self.mutex.acquire();
             // TODO: add a mutex around the result data?
             return self.value;
         }
 
         pub fn putOverwrite(self: *Self, value: T) void {
-            const lock = self.mutex.tryAcquire() orelse std.Mutex.Held{ .mutex = &self.mutex };
             self.value = value;
-            lock.release();
+            if (self.held) |lock| {
+                lock.release();
+                self.held = null;
+            }
         }
     };
 }

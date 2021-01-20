@@ -11,13 +11,13 @@ pub const SslTunnel = struct {
     x509: ssl.x509.Minimal,
     client: ssl.Client,
 
-    tcp_conn: std.fs.File,
-    tcp_reader: std.fs.File.Reader,
-    tcp_writer: std.fs.File.Writer,
+    tcp_conn: std.net.Stream,
+    tcp_reader: std.net.Stream.Reader,
+    tcp_writer: std.net.Stream.Writer,
 
     conn: Stream,
 
-    pub const Stream = ssl.Stream(*std.fs.File.Reader, *std.fs.File.Writer);
+    pub const Stream = ssl.Stream(*std.net.Stream.Reader, *std.net.Stream.Writer);
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
@@ -64,7 +64,7 @@ pub const Https = struct {
     buffer: []u8,
     client: HzzpClient,
 
-    const HzzpClient = hzzp.base.Client.Client(SslTunnel.Stream.DstInStream, SslTunnel.Stream.DstOutStream);
+    const HzzpClient = hzzp.base.Client.Client(SslTunnel.Stream.DstReader, SslTunnel.Stream.DstWriter);
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
@@ -85,7 +85,7 @@ pub const Https = struct {
         const buffer = try args.allocator.alloc(u8, 0x1000);
         errdefer args.allocator.free(buffer);
 
-        var client = hzzp.base.Client.create(buffer, ssl_tunnel.conn.inStream(), ssl_tunnel.conn.outStream());
+        var client = hzzp.base.Client.create(buffer, ssl_tunnel.conn.reader(), ssl_tunnel.conn.writer());
 
         try client.writeHead(args.method, args.path);
 
