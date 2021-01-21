@@ -904,29 +904,35 @@ pub fn Mailbox(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        value: T,
+        value: ?T,
+        cond: std.Thread.Condition,
         mutex: std.Thread.Mutex,
-        held: ?ReturnOf(std.Thread.Mutex.acquire),
 
         pub fn init() Self {
-            var result = Self{ .value = undefined, .mutex = .{}, .held = null };
-            // Manually lock this so get() is blocked
-            result.held = result.mutex.acquire();
-            return result;
+            return Self{ .value = null, .cond = .{ .impl = .{} }, .mutex = .{} };
         }
 
         pub fn get(self: *Self) T {
-            self.held = self.mutex.acquire();
-            // TODO: add a mutex around the result data?
-            return self.value;
+            const held = self.mutex.acquire();
+            defer held.release();
+
+            if (self.value) |value| {
+                self.value = null;
+                return value;
+            } else {
+                // TODO: fix stdlib so this works:
+                // self.cond.wait(&self.mutex);
+                const rc = std.os.system.pthread_cond_wait(&self.cond.impl.cond, &self.mutex.impl.pthread_mutex);
+                std.debug.assert(rc == 0);
+
+                defer self.value = null;
+                return self.value.?;
+            }
         }
 
         pub fn putOverwrite(self: *Self, value: T) void {
             self.value = value;
-            if (self.held) |lock| {
-                lock.release();
-                self.held = null;
-            }
+            self.cond.impl.signal();
         }
     };
 }
