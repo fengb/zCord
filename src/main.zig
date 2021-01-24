@@ -89,7 +89,7 @@ const Context = struct {
     // TODO move this to instance variable somehow?
     var awaiting_enema = false;
 
-    const AskData = struct { ask: Buffer(0x100), channel_id: u64 };
+    const AskData = struct { ask: Buffer(0x1000), channel_id: u64 };
 
     pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, ziglib: []const u8, github_auth_token: ?[]const u8) !*Context {
         const result = try allocator.create(Context);
@@ -250,6 +250,16 @@ const Context = struct {
             }),
             else => {},
         }
+        if (std.mem.startsWith(u8, ask, "run")) {
+            const ran = try self.parseRunAndRun(ask);
+            const desc = try std.fmt.allocPrint(self.allocator, "**stdout**: {s}\n**stderr**: {s}", .{ ran.stdout.slice(), ran.stderr.slice() });
+            defer self.allocator.free(desc);
+            return try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "Run Results:",
+                .description = desc,
+            });
+        }
 
         if (try self.maybeGithubIssue(ask)) |issue| {
             const is_pull_request = std.mem.indexOf(u8, issue.url.slice(), "/pull/") != null;
@@ -288,6 +298,44 @@ const Context = struct {
         }
     }
 
+    fn parseRunAndRun(self: Context, ask: []const u8) !RunResult {
+        // we impliment a rudimentary tokenizer
+        var b_num: u8 = 0;
+        var start_idx: usize = 0;
+        var end_idx: usize = 0;
+        var state: enum { start, text } = .start;
+        for (ask) |c, i| {
+            // skip run
+            if (i < 4) continue;
+            switch (state) {
+                .start => switch (c) {
+                    '`' => {
+                        b_num += 1;
+                        if (b_num == 2) {
+                            b_num = 0;
+                            state = .text;
+                            start_idx = i + 2;
+                        }
+                    },
+                    ' ', '\t' => continue,
+                    else => return error.InvalidInput,
+                },
+                .text => switch (c) {
+                    '`' => {
+                        b_num += 1;
+                        if (b_num == 2) {
+                            end_idx = i;
+                            break;
+                        }
+                    },
+                    else => continue,
+                },
+            }
+        }
+        if (start_idx == 0) return error.InvalidInput;
+        if (end_idx == 0) return error.InvalidInput;
+        return self.requestRun(ask[start_idx..end_idx]);
+    }
     fn maybeGithubIssue(self: Context, ask: []const u8) !?GithubIssue {
         if (std.fmt.parseInt(u32, ask, 10)) |issue| {
             return try self.requestGithubIssue("ziglang/zig", ask);
@@ -363,7 +411,61 @@ const Context = struct {
         }
     }
 
-    const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x100), url: Buffer(0x100) };
+    pub fn requestRun(self: Context, src: []const u8) !RunResult {
+        var req = try request.Https.init(.{
+            .allocator = self.allocator,
+            .pem = @embedFile("../emkc-org-chain.pem"),
+            .host = "emkc.org",
+            .method = "POST",
+            .path = "/api/v1/piston/execute",
+        });
+        defer req.deinit();
+
+        try req.client.writeHeaderValue("Content-Type", "application/json");
+
+        try req.printSend("{}", .{
+            format.json(.{
+                .language = "zig",
+                .source = src,
+                .stdin = "",
+                .args = [0][]const u8{},
+            }),
+        });
+
+        _ = try req.expectSuccessStatus();
+        try req.completeHeaders();
+
+        var body = req.body();
+
+        var stream = util.streamJson(body.reader());
+        const root = try stream.root();
+
+        var result = RunResult{};
+
+        while (try root.objectMatchAny(&[_][]const u8{
+            "stdout",
+            "stderr",
+        })) |match| {
+            const swh = util.Swhash(16);
+            switch (swh.match(match.key)) {
+                swh.case("stdout") => {
+                    const slice = try match.value.stringBuffer(&result.stdout.data);
+                    result.stdout.len = slice.len;
+                },
+                swh.case("stderr") => {
+                    const slice = try match.value.stringBuffer(&result.stderr.data);
+                    result.stderr.len = slice.len;
+                },
+                else => unreachable,
+            }
+        }
+        return result;
+    }
+    const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x1000), url: Buffer(0x100) };
+    const RunResult = struct {
+        stdout: Buffer(0x1000) = .{},
+        stderr: Buffer(0x1000) = .{},
+    };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
     const HexColor = enum(u24) {
         black = 0,
@@ -462,7 +564,7 @@ pub fn main() !void {
             fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
                 if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-                var ask: Buffer(0x100) = .{};
+                var ask: Buffer(0x1000) = .{};
                 var channel_id: ?u64 = null;
 
                 while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
@@ -487,14 +589,15 @@ pub fn main() !void {
                 }
             }
 
-            fn findAsk(reader: anytype) !Buffer(0x100) {
+            fn findAsk(reader: anytype) !Buffer(0x1000) {
                 const State = enum {
                     no_match,
                     percent,
                     ready,
+                    run,
                 };
                 var state = State.no_match;
-                var buffer: Buffer(0x100) = .{};
+                var buffer: Buffer(0x1000) = .{};
 
                 while (reader.readByte()) |c| {
                     switch (state) {
@@ -507,11 +610,17 @@ pub fn main() !void {
                             state = if (c == '%') .ready else .no_match;
                         },
                         .ready => {
+                            if (std.mem.startsWith(u8, buffer.slice(), "run")) {
+                                state = .run;
+                                try buffer.append(c);
+                                continue;
+                            }
                             switch (c) {
                                 ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => break,
                                 else => try buffer.append(c),
                             }
                         },
+                        .run => try buffer.append(c),
                     }
                 } else |err| switch (err) {
                     error.EndOfStream => {},

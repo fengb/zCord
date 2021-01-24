@@ -22,7 +22,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const hzzp = std.build.Pkg{
         .name = "hzzp",
-        .path = "lib/hzzp/src/main.zig",
+        .path = "hzzp/src/main.zig",
     };
 
     exe.addPackage(hzzp);

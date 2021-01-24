@@ -6,7 +6,7 @@ pub fn Json(comptime T: type) type {
 
         pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             // TODO: convert stringify options
-            return std.json.stringify(self.data, .{}, writer);
+            return std.json.stringify(self.data, .{ .string = .{ .String = .{} } }, writer);
         }
     };
 }

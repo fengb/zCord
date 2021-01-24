@@ -1,6 +1,3 @@
-[submodule "lib/hzzp"]
-	path = lib/hzzp
-	url = https://github.com/truemedian/hzzp
 [submodule "lib/zig-bearssl"]
 	path = lib/zig-bearssl
 	url = https://github.com/fengb/zig-bearssl
