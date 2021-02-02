@@ -288,7 +288,16 @@ const Context = struct {
         }
 
         if (std.mem.startsWith(u8, ask, "run")) {
-            const run = try self.parseRun(ask);
+            const run = self.parseRun(ask) catch |e| switch (e) {
+                error.InvalidInput => {
+                    _ = try self.sendDiscordMessage(.{
+                        .channel_id = channel_id,
+                        .title = "Invalid Input",
+                    });
+                    return;
+                },
+                else => |er| return er,
+            };
             const msg_id = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "*Run pending...*",
@@ -297,11 +306,21 @@ const Context = struct {
 
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
-            const ran = try self.requestRun(&fba.allocator, run);
+            const ran = self.requestRun(&fba.allocator, run) catch |e| switch (e) {
+                error.OutOfMemory => {
+                    _ = try self.sendDiscordMessage(.{
+                        .channel_id = channel_id,
+                        .edit_msg_id = msg_id,
+                        .title = "Output Too long",
+                    });
+                    return;
+                },
+                else => |er| return er,
+            };
 
             const description_lines = &[_][]const u8{
                 "**stdout**:\n```\n",
-                ran.stderr,
+                ran.stdout,
                 "```",
                 "\n\n",
                 "**stderr**:\n```\n",
@@ -309,12 +328,16 @@ const Context = struct {
                 "```",
             };
 
-            const description = if (ran.stdout.len == 0)
-                description_lines[4..7]
-            else if (ran.stderr.len == 0)
-                description_lines[0..3]
-            else
-                description_lines[0..];
+            const description = switch (ran.stdout.len) {
+                0 => switch (ran.stderr.len) {
+                    0 => &[_][]const u8{"***No Output***"},
+                    else => description_lines[4..7],
+                },
+                else => switch (ran.stderr.len) {
+                    0 => description_lines[0..3],
+                    else => description_lines[0..],
+                },
+            };
 
             _ = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -371,7 +394,7 @@ const Context = struct {
         var b_num: u8 = 0;
         var start_idx: usize = 0;
         var end_idx: usize = 0;
-        var state: enum { start, text } = .start;
+        var state: enum { start, before_text_lang, text } = .start;
         for (ask) |c, i| {
             // skip run
             if (i < 4) continue;
@@ -381,18 +404,29 @@ const Context = struct {
                         b_num += 1;
                         if (b_num == 2) {
                             b_num = 0;
-                            state = .text;
-                            start_idx = i + 2;
+                            state = .before_text_lang;
                         }
                     },
-                    ' ', '\t' => continue,
+                    ' ', '\t', '\n' => continue,
                     else => return error.InvalidInput,
+                },
+                .before_text_lang => {
+                    switch (c) {
+                        'a'...'z',
+                        'A'...'Z',
+                        '`',
+                        => continue,
+                        else => {
+                            state = .text;
+                            start_idx = i;
+                        },
+                    }
                 },
                 .text => switch (c) {
                     '`' => {
                         b_num += 1;
                         if (b_num == 2) {
-                            end_idx = i;
+                            end_idx = i - 1;
                             break;
                         }
                     },
