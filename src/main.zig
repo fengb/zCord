@@ -594,7 +594,7 @@ pub fn main() !void {
                     no_match,
                     percent,
                     ready,
-                    run,
+                    endless,
                 };
                 var state = State.no_match;
                 var buffer: Buffer(0x1000) = .{};
@@ -610,17 +610,19 @@ pub fn main() !void {
                             state = if (c == '%') .ready else .no_match;
                         },
                         .ready => {
-                            if (std.mem.startsWith(u8, buffer.slice(), "run")) {
-                                state = .run;
-                                try buffer.append(c);
-                                continue;
-                            }
                             switch (c) {
-                                ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => break,
+                                ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => {
+                                    if (std.mem.eql(u8, buffer.slice(), "run")) {
+                                        state = .endless;
+                                        try buffer.append(c);
+                                    } else {
+                                        break;
+                                    }
+                                },
                                 else => try buffer.append(c),
                             }
                         },
-                        .run => try buffer.append(c),
+                        .endless => try buffer.append(c),
                     }
                 } else |err| switch (err) {
                     error.EndOfStream => {},
