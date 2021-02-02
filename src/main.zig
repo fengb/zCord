@@ -288,6 +288,7 @@ const Context = struct {
         }
 
         if (std.mem.startsWith(u8, ask, "run")) {
+            const run = try self.parseRun(ask);
             const msg_id = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "*Run pending...*",
@@ -296,10 +297,7 @@ const Context = struct {
 
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
-            const ran = try self.requestRun(
-                &fba.allocator,
-                try self.parseRun(ask),
-            );
+            const ran = try self.requestRun(&fba.allocator, run);
 
             const description_lines = &[_][]const u8{
                 "**stdout**:\n```\n",

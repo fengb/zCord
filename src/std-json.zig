@@ -170,7 +170,7 @@ pub const StreamingParser = struct {
         // Only call this function to generate array/object final state.
         pub fn fromInt(x: anytype) State {
             debug.assert(x == 0 or x == 1);
-            const T = @TagType(State);
+            const T = std.meta.Tag(State);
             return @intToEnum(State, @intCast(T, x));
         }
     };

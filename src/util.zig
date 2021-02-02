@@ -472,7 +472,7 @@ fn expectEqual(actual: anytype, expected: ExpectedType(@TypeOf(actual))) void {
 
 fn ExpectedType(comptime ActualType: type) type {
     if (@typeInfo(ActualType) == .Union) {
-        return @TagType(ActualType);
+        return std.meta.Tag(ActualType);
     } else {
         return ActualType;
     }
