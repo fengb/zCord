@@ -29,3 +29,50 @@ const Time = struct {
         return std.fmt.format(writer, "{: >4}:{:0>2}:{:0>2}.{:0>3}", .{ hours, mins, secs, mill });
     }
 };
+
+pub fn concat(segments: []const []const u8) Concat {
+    return .{ .segments = segments };
+}
+const Concat = struct {
+    segments: []const []const u8,
+
+    pub fn format(self: Concat, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.segments) |segment| {
+            try writer.writeAll(segment);
+        }
+    }
+
+    pub fn jsonStringify(self: Concat, options: std.json.StringifyOptions, writer: anytype) !void {
+        try writer.writeAll("\"");
+        for (self.segments) |segment| {
+            try writeJsonSegment(writer, segment);
+        }
+        try writer.writeAll("\"");
+    }
+
+    fn writeJsonSegment(writer: anytype, string: []const u8) !void {
+        var prev: usize = 0;
+
+        for (string) |char, i| {
+            const escaped = switch (char) {
+                '\\' => "\\\\",
+                '\"' => "\\\"",
+                0x8 => "\\b",
+                0xC => "\\f",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                '\t' => "\\t",
+                else => continue,
+            };
+            if (prev < i) {
+                try writer.writeAll(string[prev..i]);
+            }
+            try writer.writeAll(escaped);
+            prev = i + 1;
+        }
+
+        if (prev < string.len) {
+            try writer.writeAll(string[prev..]);
+        }
+    }
+};

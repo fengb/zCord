@@ -141,21 +141,22 @@ const Context = struct {
             swh.case("ping") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "pong",
-                .description =
-                \\```
-                \\          ,;;;!!!!!;;.
-                \\        :!!!!!!!!!!!!!!;
-                \\      :!!!!!!!!!!!!!!!!!;
-                \\     ;!!!!!!!!!!!!!!!!!!!;
-                \\    ;!!!!!!!!!!!!!!!!!!!!!
-                \\    ;!!!!!!!!!!!!!!!!!!!!'
-                \\    ;!!!!!!!!!!!!!!!!!!!'
-                \\     :!!!!!!!!!!!!!!!!'
-                \\      ,!!!!!!!!!!!!!''
-                \\   ,;!!!''''''''''
-                \\ .!!!!'
-                \\!!!!`
-                \\```
+                .description = &.{
+                    \\```
+                    \\          ,;;;!!!!!;;.
+                    \\        :!!!!!!!!!!!!!!;
+                    \\      :!!!!!!!!!!!!!!!!!;
+                    \\     ;!!!!!!!!!!!!!!!!!!!;
+                    \\    ;!!!!!!!!!!!!!!!!!!!!!
+                    \\    ;!!!!!!!!!!!!!!!!!!!!'
+                    \\    ;!!!!!!!!!!!!!!!!!!!'
+                    \\     :!!!!!!!!!!!!!!!!'
+                    \\      ,!!!!!!!!!!!!!''
+                    \\   ,;!!!''''''''''
+                    \\ .!!!!'
+                    \\!!!!`
+                    \\```
+                },
             }),
             swh.case("status") => {
                 const rusage = std.os.getrusage(std.os.RUSAGE_SELF);
@@ -166,41 +167,44 @@ const Context = struct {
                 return try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = "",
-                    .description = std.fmt.bufPrint(
-                        &buf,
-                        \\```
-                        \\Uptime:    {s}
-                        \\CPU time:  {s}
-                        \\Max RSS:      {Bi:.3}
-                        \\```
-                    ,
-                        .{
-                            format.time(@intCast(i64, self.timer.read() / std.time.ns_per_ms)),
-                            format.time(cpu_sec + cpu_us),
-                            @intCast(u64, rusage.maxrss),
-                        },
-                    ) catch unreachable,
+                    .description = &.{
+                        std.fmt.bufPrint(
+                            &buf,
+                            \\```
+                            \\Uptime:    {s}
+                            \\CPU time:  {s}
+                            \\Max RSS:      {Bi:.3}
+                            \\```
+                        ,
+                            .{
+                                format.time(@intCast(i64, self.timer.read() / std.time.ns_per_ms)),
+                                format.time(cpu_sec + cpu_us),
+                                @intCast(u64, rusage.maxrss),
+                            },
+                        ) catch unreachable,
+                    },
                 });
             },
             swh.case("zen") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "For Great Justice",
-                .description =
-                \\```
-                \\* Communicate intent precisely.
-                \\* Edge cases matter.
-                \\* Favor reading code over writing code.
-                \\* Only one obvious way to do things.
-                \\* Runtime crashes are better than bugs.
-                \\* Compile errors are better than runtime crashes.
-                \\* Incremental improvements.
-                \\* Avoid local maximums.
-                \\* Reduce the amount one must remember.
-                \\* Focus on code rather than style.
-                \\* Resource allocation may fail; resource deallocation must succeed.
-                \\* Memory is a resource.
-                \\* Together we serve the users.
-                \\```
+                .description = &.{
+                    \\```
+                    \\* Communicate intent precisely.
+                    \\* Edge cases matter.
+                    \\* Favor reading code over writing code.
+                    \\* Only one obvious way to do things.
+                    \\* Runtime crashes are better than bugs.
+                    \\* Compile errors are better than runtime crashes.
+                    \\* Incremental improvements.
+                    \\* Avoid local maximums.
+                    \\* Reduce the amount one must remember.
+                    \\* Focus on code rather than style.
+                    \\* Resource allocation may fail; resource deallocation must succeed.
+                    \\* Memory is a resource.
+                    \\* Together we serve the users.
+                    \\```
+                },
             }),
             swh.case("zenlang"),
             swh.case("v"),
@@ -212,7 +216,7 @@ const Context = struct {
             swh.case("u0") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "Zig's billion dollar mistake™",
-                .description = "https://github.com/ziglang/zig/issues/1530#issuecomment-422113755",
+                .description = &.{"https://github.com/ziglang/zig/issues/1530#issuecomment-422113755"},
             }),
             swh.case("tater") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -223,14 +227,15 @@ const Context = struct {
                 .channel_id = channel_id,
                 .color = .green,
                 .title = "ziglang/zig — issue #5076",
-                .description =
-                \\~~[syntax: drop the `const` keyword in global scopes](https://github.com/ziglang/zig/issues/5076)~~
-                \\https://www.youtube.com/watch?v=880uR25pP5U
+                .description = &.{
+                    \\~~[syntax: drop the `const` keyword in global scopes](https://github.com/ziglang/zig/issues/5076)~~
+                    \\https://www.youtube.com/watch?v=880uR25pP5U
+                },
             }),
             swh.case("submodule"), swh.case("submodules") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "git submodules are the devil — _andrewrk_",
-                .description = "https://github.com/ziglang/zig-bootstrap/issues/17#issuecomment-609980730",
+                .description = &.{"https://github.com/ziglang/zig-bootstrap/issues/17#issuecomment-609980730"},
             }),
             swh.case("2.718"), swh.case("2.71828") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -245,11 +250,12 @@ const Context = struct {
             swh.case("dab") => return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "I promised I would dab and say “bruh” — _andrewrk_",
-                .description = "https://vimeo.com/492676992",
+                .description = &.{"https://vimeo.com/492676992"},
                 .image = "https://i.vimeocdn.com/video/1018725604.jpg?mw=700&mh=1243&q=70",
             }),
             else => {},
         }
+
         if (std.mem.startsWith(u8, ask, "run")) {
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
@@ -257,12 +263,28 @@ const Context = struct {
                 &fba.allocator,
                 try self.parseRun(ask),
             );
-            const desc = try std.fmt.allocPrint(self.allocator, "**stdout**: {s}\n**stderr**: {s}", .{ ran.stdout, ran.stderr });
-            defer self.allocator.free(desc);
+
+            const description_lines = &[_][]const u8{
+                "**stdout**:\n```\n",
+                ran.stderr,
+                "```",
+                "\n\n",
+                "**stderr**:\n```\n",
+                ran.stderr,
+                "```",
+            };
+
+            const description = if (ran.stdout.len == 0)
+                description_lines[4..7]
+            else if (ran.stderr.len == 0)
+                description_lines[0..3]
+            else
+                description_lines[0..];
+
             return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
-                .title = "Run Results:",
-                .description = desc,
+                .title = "Run Results",
+                .description = description,
             });
         }
 
@@ -276,12 +298,16 @@ const Context = struct {
                 label,
                 issue.number,
             });
-            var desc_buf: [0x1000]u8 = undefined;
-            const description = try std.fmt.bufPrint(&desc_buf, "[{s}]({s})", .{ issue.title.slice(), issue.url.slice() });
             try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = title,
-                .description = description,
+                .description = &.{
+                    "[",
+                    issue.title.slice(),
+                    "](",
+                    issue.url.slice(),
+                    ")",
+                },
                 .color = if (is_pull_request) HexColor.blue else HexColor.green,
             });
         } else {
@@ -296,7 +322,7 @@ const Context = struct {
                 try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = ask,
-                    .description = std.mem.trim(u8, match, " \t\r\n"),
+                    .description = &.{std.mem.trim(u8, match, " \t\r\n")},
                     .color = .red,
                 });
             } else {}
@@ -359,7 +385,7 @@ const Context = struct {
         channel_id: u64,
         title: []const u8,
         color: HexColor = HexColor.black,
-        description: ?[]const u8 = null,
+        description: []const []const u8 = &.{},
         image: ?[]const u8 = null,
     }) !void {
         var path: [0x100]u8 = undefined;
@@ -385,7 +411,7 @@ const Context = struct {
         const embed = .{
             .title = args.title,
             .color = @enumToInt(args.color),
-            .description = args.description,
+            .description = format.concat(args.description),
             .image = image,
         };
         try req.printSend("{}", .{
