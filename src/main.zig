@@ -296,7 +296,6 @@ const Context = struct {
                     });
                     return;
                 },
-                else => |er| return er,
             };
 
             const has_fns = std.mem.indexOf(u8, run, "fn ") != null;
@@ -308,36 +307,34 @@ const Context = struct {
                 .description = &.{},
             });
 
-            var ran: RunResult = undefined;
-            var s: [][]const u8 = undefined;
-            if (has_import_std and has_fns) {
-                s = &.{run};
-            } else {
-                const fn_main = "pub fn main() void {";
-                const fn_main_end = "}";
-                const import_std = "const std = @import(\"std\");";
-                if (!has_import_std) {
-                    if (!has_fns) {
-                        s = &.{ import_std, fn_main, run, fn_main_end };
-                    } else {
-                        s = &.{ import_std, run };
-                    }
-                } else if (!has_fns) {
-                    s = &.{ fn_main, run, fn_main_end };
-                }
-            }
+            const import_std = "const std = @import(\"std\");";
+            const fn_main = "pub fn main() void {";
+            const fn_main_end = "}";
+
+            const b = comptime util.boolMatcher(2);
+            const segments = switch (b(.{ has_import_std, has_fns })) {
+                b(.{ false, false }) => &[_][]const u8{ import_std, fn_main, run, fn_main_end },
+                b(.{ false, true }) => &[_][]const u8{ import_std, run },
+                b(.{ true, false }) => &[_][]const u8{ fn_main, run, fn_main_end },
+                b(.{ true, true }) => &[_][]const u8{run},
+            };
+
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
-            ran = self.requestRun(&fba.allocator, s) catch |e| switch (e) {
-                error.OutOfMemory => {
-                    _ = try self.sendDiscordMessage(.{
-                        .channel_id = channel_id,
-                        .edit_msg_id = msg_id,
-                        .title = "Output Too long",
-                    });
-                    return;
-                },
-                else => |er| return er,
+            const ran = self.requestRun(&fba.allocator, segments) catch |e| {
+                const output = switch (e) {
+                    error.OutOfMemory => "*Output too long*",
+                    error.TooManyRequests => "*Too many requests*",
+                    else => "*Unknown error*",
+                };
+
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .edit_msg_id = msg_id,
+                    .title = "Run error",
+                    .description = &.{output},
+                });
+                return e;
             };
 
             const description_lines = &[_][]const u8{
@@ -350,15 +347,11 @@ const Context = struct {
                 "```",
             };
 
-            const description = switch (ran.stdout.len) {
-                0 => switch (ran.stderr.len) {
-                    0 => &[_][]const u8{"***No Output***"},
-                    else => description_lines[4..7],
-                },
-                else => switch (ran.stderr.len) {
-                    0 => description_lines[0..3],
-                    else => description_lines[0..],
-                },
+            const description = switch (b(.{ ran.stdout.len > 0, ran.stderr.len > 0 })) {
+                b(.{ false, false }) => &[_][]const u8{"***No Output***"},
+                b(.{ true, false }) => description_lines[0..3],
+                b(.{ false, true }) => description_lines[4..7],
+                b(.{ true, true }) => description_lines[0..],
             };
 
             _ = try self.sendDiscordMessage(.{

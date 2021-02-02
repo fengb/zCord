@@ -896,6 +896,24 @@ pub fn Swhash(comptime max_bytes: comptime_int) type {
     };
 }
 
+pub fn boolMatcher(comptime size: comptime_int) @TypeOf(BoolMatcher(size).m) {
+    return BoolMatcher(size).m;
+}
+
+pub fn BoolMatcher(comptime size: comptime_int) type {
+    const T = std.meta.Int(.unsigned, size);
+    return struct {
+        pub fn m(array: [size]bool) T {
+            var result: T = 0;
+            comptime var i = 0;
+            inline while (i < size) : (i += 1) {
+                result |= @as(T, @boolToInt(array[i])) << i;
+            }
+            return result;
+        }
+    };
+}
+
 fn ReturnOf(comptime func: anytype) type {
     return @typeInfo(@TypeOf(func)).Fn.return_type.?;
 }
