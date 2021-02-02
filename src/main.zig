@@ -138,33 +138,36 @@ const Context = struct {
     pub fn askOne(self: *Context, channel_id: u64, ask: []const u8) !void {
         const swh = util.Swhash(16);
         switch (swh.match(ask)) {
-            swh.case("ping") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "pong",
-                .description = &.{
-                    \\```
-                    \\          ,;;;!!!!!;;.
-                    \\        :!!!!!!!!!!!!!!;
-                    \\      :!!!!!!!!!!!!!!!!!;
-                    \\     ;!!!!!!!!!!!!!!!!!!!;
-                    \\    ;!!!!!!!!!!!!!!!!!!!!!
-                    \\    ;!!!!!!!!!!!!!!!!!!!!'
-                    \\    ;!!!!!!!!!!!!!!!!!!!'
-                    \\     :!!!!!!!!!!!!!!!!'
-                    \\      ,!!!!!!!!!!!!!''
-                    \\   ,;!!!''''''''''
-                    \\ .!!!!'
-                    \\!!!!`
-                    \\```
-                },
-            }),
+            swh.case("ping") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "pong",
+                    .description = &.{
+                        \\```
+                        \\          ,;;;!!!!!;;.
+                        \\        :!!!!!!!!!!!!!!;
+                        \\      :!!!!!!!!!!!!!!!!!;
+                        \\     ;!!!!!!!!!!!!!!!!!!!;
+                        \\    ;!!!!!!!!!!!!!!!!!!!!!
+                        \\    ;!!!!!!!!!!!!!!!!!!!!'
+                        \\    ;!!!!!!!!!!!!!!!!!!!'
+                        \\     :!!!!!!!!!!!!!!!!'
+                        \\      ,!!!!!!!!!!!!!''
+                        \\   ,;!!!''''''''''
+                        \\ .!!!!'
+                        \\!!!!`
+                        \\```
+                    },
+                });
+                return;
+            },
             swh.case("status") => {
                 const rusage = std.os.getrusage(std.os.RUSAGE_SELF);
                 const cpu_sec = (rusage.utime.tv_sec + rusage.stime.tv_sec) * 1000;
                 const cpu_us = @divFloor(rusage.utime.tv_usec + rusage.stime.tv_usec, 1000);
 
                 var buf: [0x1000]u8 = undefined;
-                return try self.sendDiscordMessage(.{
+                _ = try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = "",
                     .description = &.{
@@ -184,79 +187,113 @@ const Context = struct {
                         ) catch unreachable,
                     },
                 });
+                return;
             },
-            swh.case("zen") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "For Great Justice",
-                .description = &.{
-                    \\```
-                    \\* Communicate intent precisely.
-                    \\* Edge cases matter.
-                    \\* Favor reading code over writing code.
-                    \\* Only one obvious way to do things.
-                    \\* Runtime crashes are better than bugs.
-                    \\* Compile errors are better than runtime crashes.
-                    \\* Incremental improvements.
-                    \\* Avoid local maximums.
-                    \\* Reduce the amount one must remember.
-                    \\* Focus on code rather than style.
-                    \\* Resource allocation may fail; resource deallocation must succeed.
-                    \\* Memory is a resource.
-                    \\* Together we serve the users.
-                    \\```
-                },
-            }),
+            swh.case("zen") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "For Great Justice",
+                    .description = &.{
+                        \\```
+                        \\* Communicate intent precisely.
+                        \\* Edge cases matter.
+                        \\* Favor reading code over writing code.
+                        \\* Only one obvious way to do things.
+                        \\* Runtime crashes are better than bugs.
+                        \\* Compile errors are better than runtime crashes.
+                        \\* Incremental improvements.
+                        \\* Avoid local maximums.
+                        \\* Reduce the amount one must remember.
+                        \\* Focus on code rather than style.
+                        \\* Resource allocation may fail; resource deallocation must succeed.
+                        \\* Memory is a resource.
+                        \\* Together we serve the users.
+                        \\```
+                    },
+                });
+                return;
+            },
             swh.case("zenlang"),
             swh.case("v"),
             swh.case("vlang"),
-            => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "bruh",
-            }),
-            swh.case("u0") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "Zig's billion dollar mistake™",
-                .description = &.{"https://github.com/ziglang/zig/issues/1530#issuecomment-422113755"},
-            }),
-            swh.case("tater") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "",
-                .image = "https://memegenerator.net/img/instances/41913604.jpg",
-            }),
-            swh.case("5076"), swh.case("ziglang/zig#5076") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .color = .green,
-                .title = "ziglang/zig — issue #5076",
-                .description = &.{
-                    \\~~[syntax: drop the `const` keyword in global scopes](https://github.com/ziglang/zig/issues/5076)~~
-                    \\https://www.youtube.com/watch?v=880uR25pP5U
-                },
-            }),
-            swh.case("submodule"), swh.case("submodules") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "git submodules are the devil — _andrewrk_",
-                .description = &.{"https://github.com/ziglang/zig-bootstrap/issues/17#issuecomment-609980730"},
-            }),
-            swh.case("2.718"), swh.case("2.71828") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "",
-                .image = "https://camo.githubusercontent.com/7f0d955df2205a170bf1582105c319ec6b00ec5c/68747470733a2f2f692e696d67666c69702e636f6d2f34646d7978702e6a7067",
-            }),
-            swh.case("bruh") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "",
-                .image = "https://user-images.githubusercontent.com/106511/86198112-6718ba00-bb46-11ea-92fd-d006b462c5b1.jpg",
-            }),
-            swh.case("dab") => return try self.sendDiscordMessage(.{
-                .channel_id = channel_id,
-                .title = "I promised I would dab and say “bruh” — _andrewrk_",
-                .description = &.{"https://vimeo.com/492676992"},
-                .image = "https://i.vimeocdn.com/video/1018725604.jpg?mw=700&mh=1243&q=70",
-            }),
+            => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "bruh",
+                });
+                return;
+            },
+            swh.case("u0") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "Zig's billion dollar mistake™",
+                    .description = &.{"https://github.com/ziglang/zig/issues/1530#issuecomment-422113755"},
+                });
+                return;
+            },
+            swh.case("tater") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "",
+                    .image = "https://memegenerator.net/img/instances/41913604.jpg",
+                });
+                return;
+            },
+            swh.case("5076"), swh.case("ziglang/zig#5076") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .color = .green,
+                    .title = "ziglang/zig — issue #5076",
+                    .description = &.{
+                        \\~~[syntax: drop the `const` keyword in global scopes](https://github.com/ziglang/zig/issues/5076)~~
+                        \\https://www.youtube.com/watch?v=880uR25pP5U
+                    },
+                });
+                return;
+            },
+            swh.case("submodule"), swh.case("submodules") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "git submodules are the devil — _andrewrk_",
+                    .description = &.{"https://github.com/ziglang/zig-bootstrap/issues/17#issuecomment-609980730"},
+                });
+                return;
+            },
+            swh.case("2.718"), swh.case("2.71828") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "",
+                    .image = "https://camo.githubusercontent.com/7f0d955df2205a170bf1582105c319ec6b00ec5c/68747470733a2f2f692e696d67666c69702e636f6d2f34646d7978702e6a7067",
+                });
+                return;
+            },
+            swh.case("bruh") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "",
+                    .image = "https://user-images.githubusercontent.com/106511/86198112-6718ba00-bb46-11ea-92fd-d006b462c5b1.jpg",
+                });
+                return;
+            },
+            swh.case("dab") => {
+                _ = try self.sendDiscordMessage(.{
+                    .channel_id = channel_id,
+                    .title = "I promised I would dab and say “bruh” — _andrewrk_",
+                    .description = &.{"https://vimeo.com/492676992"},
+                    .image = "https://i.vimeocdn.com/video/1018725604.jpg?mw=700&mh=1243&q=70",
+                });
+                return;
+            },
             else => {},
         }
 
         if (std.mem.startsWith(u8, ask, "run")) {
+            const msg_id = try self.sendDiscordMessage(.{
+                .channel_id = channel_id,
+                .title = "*Run pending...*",
+                .description = &.{},
+            });
+
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
             const ran = try self.requestRun(
@@ -281,11 +318,13 @@ const Context = struct {
             else
                 description_lines[0..];
 
-            return try self.sendDiscordMessage(.{
+            _ = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
+                .edit_msg_id = msg_id,
                 .title = "Run Results",
                 .description = description,
             });
+            return;
         }
 
         if (try self.maybeGithubIssue(ask)) |issue| {
@@ -298,7 +337,7 @@ const Context = struct {
                 label,
                 issue.number,
             });
-            try self.sendDiscordMessage(.{
+            _ = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = title,
                 .description = &.{
@@ -319,7 +358,7 @@ const Context = struct {
                 awaiting_enema = false;
             }
             if (try analBuddy.analyse(&arena, &self.prepared_anal, ask)) |match| {
-                try self.sendDiscordMessage(.{
+                _ = try self.sendDiscordMessage(.{
                     .channel_id = channel_id,
                     .title = ask,
                     .description = &.{std.mem.trim(u8, match, " \t\r\n")},
@@ -383,18 +422,26 @@ const Context = struct {
 
     pub fn sendDiscordMessage(self: Context, args: struct {
         channel_id: u64,
+        edit_msg_id: u64 = 0,
         title: []const u8,
         color: HexColor = HexColor.black,
         description: []const []const u8 = &.{},
         image: ?[]const u8 = null,
-    }) !void {
-        var path: [0x100]u8 = undefined;
+    }) !u64 {
+        var path_buf: [0x100]u8 = undefined;
+
+        const method = if (args.edit_msg_id == 0) "POST" else "PATCH";
+        const path = if (args.edit_msg_id == 0)
+            try std.fmt.bufPrint(&path_buf, "/api/v6/channels/{d}/messages", .{args.channel_id})
+        else
+            try std.fmt.bufPrint(&path_buf, "/api/v6/channels/{d}/messages/{d}", .{ args.channel_id, args.edit_msg_id });
+
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../discord-com-chain.pem"),
             .host = "discord.com",
-            .method = "POST",
-            .path = try std.fmt.bufPrint(&path, "/api/v6/channels/{d}/messages", .{args.channel_id}),
+            .method = method,
+            .path = path,
         });
         defer req.deinit();
 
@@ -423,8 +470,18 @@ const Context = struct {
         });
 
         if (req.expectSuccessStatus()) |_| {
-            // Rudimentary rate limiting
-            std.time.sleep(std.time.ns_per_s);
+            try req.completeHeaders();
+
+            var body = req.body();
+            var stream = util.streamJson(body.reader());
+
+            const root = try stream.root();
+            if (try root.objectMatchAny(&.{"id"})) |match| {
+                var buf: [0x100]u8 = undefined;
+                const id_string = try match.value.stringBuffer(&buf);
+                return try std.fmt.parseInt(u64, id_string, 10);
+            }
+            return error.IdNotFound;
         } else |err| switch (err) {
             error.TooManyRequests => {
                 try req.completeHeaders();
@@ -438,6 +495,7 @@ const Context = struct {
                     // Don't bother trying for awhile
                     std.time.sleep(@floatToInt(u64, sec * std.time.ns_per_s));
                 }
+                return error.TooManyRequests;
             },
             else => return err,
         }
