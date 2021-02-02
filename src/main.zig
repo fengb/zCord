@@ -251,8 +251,13 @@ const Context = struct {
             else => {},
         }
         if (std.mem.startsWith(u8, ask, "run")) {
-            const ran = try self.parseRunAndRun(ask);
-            const desc = try std.fmt.allocPrint(self.allocator, "**stdout**: {s}\n**stderr**: {s}", .{ ran.stdout.slice(), ran.stderr.slice() });
+            var buffer: [0x4000]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buffer);
+            const ran = try self.requestRun(
+                &fba.allocator,
+                try self.parseRun(ask),
+            );
+            const desc = try std.fmt.allocPrint(self.allocator, "**stdout**: {s}\n**stderr**: {s}", .{ ran.stdout, ran.stderr });
             defer self.allocator.free(desc);
             return try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
@@ -298,7 +303,7 @@ const Context = struct {
         }
     }
 
-    fn parseRunAndRun(self: Context, ask: []const u8) !RunResult {
+    fn parseRun(self: Context, ask: []const u8) ![]const u8 {
         // we impliment a rudimentary tokenizer
         var b_num: u8 = 0;
         var start_idx: usize = 0;
@@ -334,8 +339,9 @@ const Context = struct {
         }
         if (start_idx == 0) return error.InvalidInput;
         if (end_idx == 0) return error.InvalidInput;
-        return self.requestRun(ask[start_idx..end_idx]);
+        return ask[start_idx..end_idx];
     }
+
     fn maybeGithubIssue(self: Context, ask: []const u8) !?GithubIssue {
         if (std.fmt.parseInt(u32, ask, 10)) |issue| {
             return try self.requestGithubIssue("ziglang/zig", ask);
@@ -411,7 +417,7 @@ const Context = struct {
         }
     }
 
-    pub fn requestRun(self: Context, src: []const u8) !RunResult {
+    pub fn requestRun(self: Context, allocator: *std.mem.Allocator, src: []const u8) !RunResult {
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../emkc-org-chain.pem"),
@@ -440,7 +446,18 @@ const Context = struct {
         var stream = util.streamJson(body.reader());
         const root = try stream.root();
 
-        var result = RunResult{};
+        var result = RunResult{
+            .stdout = &.{},
+            .stderr = &.{},
+        };
+        errdefer {
+            if (result.stdout.len > 0) {
+                allocator.free(result.stdout);
+            }
+            if (result.stderr.len > 0) {
+                allocator.free(result.stderr);
+            }
+        }
 
         while (try root.objectMatchAny(&[_][]const u8{
             "stdout",
@@ -449,22 +466,23 @@ const Context = struct {
             const swh = util.Swhash(16);
             switch (swh.match(match.key)) {
                 swh.case("stdout") => {
-                    const slice = try match.value.stringBuffer(&result.stdout.data);
-                    result.stdout.len = slice.len;
+                    const reader = try match.value.stringReader();
+                    result.stdout = try reader.readAllAlloc(allocator, std.math.maxInt(usize));
                 },
                 swh.case("stderr") => {
-                    const slice = try match.value.stringBuffer(&result.stderr.data);
-                    result.stderr.len = slice.len;
+                    const reader = try match.value.stringReader();
+                    result.stderr = try reader.readAllAlloc(allocator, std.math.maxInt(usize));
                 },
                 else => unreachable,
             }
         }
         return result;
     }
-    const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x1000), url: Buffer(0x100) };
+
+    const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x100), url: Buffer(0x100) };
     const RunResult = struct {
-        stdout: Buffer(0x1000) = .{},
-        stderr: Buffer(0x1000) = .{},
+        stdout: []const u8,
+        stderr: []const u8,
     };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
     const HexColor = enum(u24) {
