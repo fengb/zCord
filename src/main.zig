@@ -634,6 +634,28 @@ const Context = struct {
 };
 
 pub fn main() !void {
+    std.os.sigaction(
+        std.os.SIGUSR1,
+        &std.os.Sigaction{
+            .handler = .{
+                .handler = struct {
+                    fn handler(signum: c_int) callconv(.C) void {
+                        const err = std.os.execveZ(
+                            std.os.argv[0],
+                            @ptrCast([*:null]?[*:0]u8, std.os.argv.ptr),
+                            @ptrCast([*:null]?[*:0]u8, std.os.environ.ptr),
+                        );
+
+                        std.debug.print("{s}\n", .{@errorName(err)});
+                    }
+                }.handler,
+            },
+            .mask = std.os.empty_sigset,
+            .flags = 0,
+        },
+        null,
+    );
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var auth_buf: [0x100]u8 = undefined;
