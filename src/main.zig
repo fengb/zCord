@@ -298,15 +298,37 @@ const Context = struct {
                 },
                 else => |er| return er,
             };
+
+            const has_fns = std.mem.indexOf(u8, run, "fn ") != null;
+            const has_import_std = std.mem.indexOf(u8, run, "@import(\"std\")") != null;
+
             const msg_id = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .title = "*Run pending...*",
                 .description = &.{},
             });
 
+            var ran: RunResult = undefined;
+            var s: [][]const u8 = undefined;
+            if (has_import_std and has_fns) {
+                s = &.{run};
+            } else {
+                const fn_main = "pub fn main() void {";
+                const fn_main_end = "}";
+                const import_std = "const std = @import(\"std\");";
+                if (!has_import_std) {
+                    if (!has_fns) {
+                        s = &.{ import_std, fn_main, run, fn_main_end };
+                    } else {
+                        s = &.{ import_std, run };
+                    }
+                } else if (!has_fns) {
+                    s = &.{ fn_main, run, fn_main_end };
+                }
+            }
             var buffer: [0x4000]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
-            const ran = self.requestRun(&fba.allocator, run) catch |e| switch (e) {
+            ran = self.requestRun(&fba.allocator, s) catch |e| switch (e) {
                 error.OutOfMemory => {
                     _ = try self.sendDiscordMessage(.{
                         .channel_id = channel_id,
@@ -533,7 +555,7 @@ const Context = struct {
         }
     }
 
-    pub fn requestRun(self: Context, allocator: *std.mem.Allocator, src: []const u8) !RunResult {
+    pub fn requestRun(self: Context, allocator: *std.mem.Allocator, src: [][]const u8) !RunResult {
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../emkc-org-chain.pem"),
@@ -548,7 +570,7 @@ const Context = struct {
         try req.printSend("{}", .{
             format.json(.{
                 .language = "zig",
-                .source = src,
+                .source = format.concat(src),
                 .stdin = "",
                 .args = [0][]const u8{},
             }),
