@@ -319,13 +319,12 @@ const Context = struct {
                 b(.{ true, true }) => &[_][]const u8{run},
             };
 
-            var buffer: [0x4000]u8 = undefined;
-            var fba = std.heap.FixedBufferAllocator.init(&buffer);
-            const ran = self.requestRun(&fba.allocator, segments) catch |e| {
+            var stdout_buffer: [1024]u8 = undefined;
+            var stderr_buffer: [1024]u8 = undefined;
+            const ran = self.requestRun(segments, stdout_buffer[3..1021], stderr_buffer[3..1000]) catch |e| {
                 const output = switch (e) {
-                    error.OutOfMemory => "*Output too long*",
-                    error.TooManyRequests => "*Too many requests*",
-                    else => "*Unknown error*",
+                    error.TooManyRequests => "***Too many requests***",
+                    else => "***Unknown error***",
                 };
 
                 _ = try self.sendDiscordMessage(.{
@@ -337,28 +336,25 @@ const Context = struct {
                 return e;
             };
 
-            const description_lines = &[_][]const u8{
-                "**stdout**:\n```\n",
-                ran.stdout,
-                "```",
-                "\n\n",
-                "**stderr**:\n```\n",
-                ran.stderr,
-                "```",
+            var description: []const []const u8 = &.{};
+            const all_fields = [_]EmbedField{
+                .{ .name = "stdout", .value = wrapString(ran.stdout, "```") },
+                .{ .name = "stderr", .value = wrapString(ran.stderr, "```") },
             };
-
-            const description = switch (b(.{ ran.stdout.len > 0, ran.stderr.len > 0 })) {
-                b(.{ false, false }) => &[_][]const u8{"***No Output***"},
-                b(.{ true, false }) => description_lines[0..3],
-                b(.{ false, true }) => description_lines[4..7],
-                b(.{ true, true }) => description_lines[0..],
-            };
+            var fields: []const EmbedField = &.{};
+            switch (b(.{ ran.stdout.len > 0, ran.stderr.len > 0 })) {
+                b(.{ false, false }) => description = &.{"***No Output***"},
+                b(.{ true, false }) => fields = all_fields[0..1],
+                b(.{ false, true }) => fields = all_fields[1..],
+                b(.{ true, true }) => fields = all_fields[0..],
+            }
 
             _ = try self.sendDiscordMessage(.{
                 .channel_id = channel_id,
                 .edit_msg_id = msg_id,
                 .title = "Run Results",
                 .description = description,
+                .fields = fields,
             });
             return;
         }
@@ -402,6 +398,16 @@ const Context = struct {
                 });
             } else {}
         }
+    }
+
+    // This breaks out of the passed-in buffer and prepends/postpends with wrapper text.
+    // Thar be dragons 🐉
+    fn wrapString(buffer: []u8, wrapper: []const u8) []u8 {
+        const start_ptr = buffer.ptr - wrapper.len;
+        const frame = start_ptr[0 .. buffer.len + 2 * wrapper.len];
+        std.mem.copy(u8, frame[0..], wrapper);
+        std.mem.copy(u8, frame[buffer.len + wrapper.len ..], wrapper);
+        return frame;
     }
 
     fn parseRun(self: Context, ask: []const u8) ![]const u8 {
@@ -467,12 +473,15 @@ const Context = struct {
         return try self.requestGithubIssue(ask[0..pound], ask[pound + 1 ..]);
     }
 
+    const EmbedField = struct { name: []const u8, value: []const u8 };
+
     pub fn sendDiscordMessage(self: Context, args: struct {
         channel_id: u64,
         edit_msg_id: u64 = 0,
         title: []const u8,
         color: HexColor = HexColor.black,
         description: []const []const u8 = &.{},
+        fields: []const EmbedField = &.{},
         image: ?[]const u8 = null,
     }) !u64 {
         var path_buf: [0x100]u8 = undefined;
@@ -506,6 +515,7 @@ const Context = struct {
             .title = args.title,
             .color = @enumToInt(args.color),
             .description = format.concat(args.description),
+            .fields = args.fields,
             .image = image,
         };
         try req.printSend("{}", .{
@@ -548,7 +558,7 @@ const Context = struct {
         }
     }
 
-    pub fn requestRun(self: Context, allocator: *std.mem.Allocator, src: [][]const u8) !RunResult {
+    pub fn requestRun(self: Context, src: [][]const u8, stdout_buf: []u8, stderr_buf: []u8) !RunResult {
         var req = try request.Https.init(.{
             .allocator = self.allocator,
             .pem = @embedFile("../emkc-org-chain.pem"),
@@ -578,17 +588,9 @@ const Context = struct {
         const root = try stream.root();
 
         var result = RunResult{
-            .stdout = &.{},
-            .stderr = &.{},
+            .stdout = stdout_buf[0..0],
+            .stderr = stderr_buf[0..0],
         };
-        errdefer {
-            if (result.stdout.len > 0) {
-                allocator.free(result.stdout);
-            }
-            if (result.stderr.len > 0) {
-                allocator.free(result.stderr);
-            }
-        }
 
         while (try root.objectMatchAny(&[_][]const u8{
             "stdout",
@@ -597,23 +599,28 @@ const Context = struct {
             const swh = util.Swhash(16);
             switch (swh.match(match.key)) {
                 swh.case("stdout") => {
-                    const reader = try match.value.stringReader();
-                    result.stdout = try reader.readAllAlloc(allocator, std.math.maxInt(usize));
+                    result.stdout = match.value.stringBuffer(stdout_buf) catch |err| switch (err) {
+                        error.NoSpaceLeft => stdout_buf,
+                        else => |e| return e,
+                    };
                 },
                 swh.case("stderr") => {
-                    const reader = try match.value.stringReader();
-                    result.stderr = try reader.readAllAlloc(allocator, std.math.maxInt(usize));
+                    result.stderr = match.value.stringBuffer(stderr_buf) catch |err| switch (err) {
+                        error.NoSpaceLeft => stderr_buf,
+                        else => |e| return e,
+                    };
                 },
                 else => unreachable,
             }
+            _ = try match.value.finalizeToken();
         }
         return result;
     }
 
     const GithubIssue = struct { repo: Buffer(0x100), number: u32, title: Buffer(0x100), url: Buffer(0x100) };
     const RunResult = struct {
-        stdout: []const u8,
-        stderr: []const u8,
+        stdout: []u8,
+        stderr: []u8,
     };
     // from https://gist.github.com/thomasbnt/b6f455e2c7d743b796917fa3c205f812
     const HexColor = enum(u24) {
