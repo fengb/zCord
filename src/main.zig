@@ -307,9 +307,9 @@ const Context = struct {
                 .description = &.{},
             });
 
-            const import_std = "const std = @import(\"std\");";
-            const fn_main = "pub fn main() void {";
-            const fn_main_end = "}";
+            const import_std = "const std = @import(\"std\");\n";
+            const fn_main = "pub fn main() anyerror!void {\n";
+            const fn_main_end = "  }\n";
 
             const b = comptime util.boolMatcher(2);
             const segments = switch (b(.{ has_import_std, has_fns })) {
