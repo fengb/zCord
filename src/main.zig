@@ -529,8 +529,7 @@ const Context = struct {
         if (req.expectSuccessStatus()) |_| {
             try req.completeHeaders();
 
-            var body = req.body();
-            var stream = util.streamJson(body.reader());
+            var stream = util.streamJson(req.client.reader());
 
             const root = try stream.root();
             if (try root.objectMatchAny(&.{"id"})) |match| {
@@ -543,8 +542,7 @@ const Context = struct {
             error.TooManyRequests => {
                 try req.completeHeaders();
 
-                var body = req.body();
-                var stream = util.streamJson(body.reader());
+                var stream = util.streamJson(req.client.reader());
                 const root = try stream.root();
 
                 if (try root.objectMatch("retry_after")) |match| {
@@ -582,9 +580,7 @@ const Context = struct {
         _ = try req.expectSuccessStatus();
         try req.completeHeaders();
 
-        var body = req.body();
-
-        var stream = util.streamJson(body.reader());
+        var stream = util.streamJson(req.client.reader());
         const root = try stream.root();
 
         var result = RunResult{
@@ -649,17 +645,14 @@ const Context = struct {
 
         try req.client.writeHeaderValue("Accept", "application/json");
         if (self.github_auth_token) |github_auth_token| {
-            var auth_buf: [0x100]u8 = undefined;
-            const token = try std.fmt.bufPrint(&auth_buf, "token {s}", .{github_auth_token});
-            try req.client.writeHeaderValue("Authorization", token);
+            try req.client.writeHeaderFormat("Authorization", "token {s}", .{github_auth_token});
         }
-        try req.client.writeHeadComplete();
+        try req.client.finishHeaders();
         try req.ssl_tunnel.conn.flush();
 
         _ = try req.expectSuccessStatus();
         try req.completeHeaders();
-        var body = req.body();
-        var stream = util.streamJson(body.reader());
+        var stream = util.streamJson(req.client.reader());
         const root = try stream.root();
 
         var result = GithubIssue{ .repo = Buffer(0x100).initFrom(repo), .number = 0, .title = .{}, .url = .{} };
@@ -830,7 +823,7 @@ const DiscordWs = struct {
     is_dying: bool,
     ssl_tunnel: *request.SslTunnel,
 
-    client: wz.base.Client.Client(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
+    client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
     client_buffer: []u8,
     write_mutex: std.Thread.Mutex,
 
@@ -908,26 +901,26 @@ const DiscordWs = struct {
         result.client_buffer = try allocator.alloc(u8, 0x1000);
         errdefer allocator.free(result.client_buffer);
 
-        result.client = wz.base.Client.create(
+        result.client = wz.base.client.create(
             result.client_buffer,
             result.ssl_tunnel.conn.reader(),
             result.ssl_tunnel.conn.writer(),
         );
 
         // Handshake
-        try result.client.sendHandshakeHead("/?v=6&encoding=json");
-        try result.client.sendHandshakeHeaderValue("Host", "gateway.discord.gg");
-        try result.client.sendHandshakeHeadComplete();
+        try result.client.handshakeStart("/?v=6&encoding=json");
+        try result.client.handshakeAddHeaderValue("Host", "gateway.discord.gg");
+        try result.client.handshake_client.finishHeaders(); // needed due to SSL flushing
         try result.ssl_tunnel.conn.flush();
-        try result.client.waitForHandshake();
+        try result.client.handshakeFinish();
 
-        if (try result.client.readEvent()) |event| {
+        if (try result.client.next()) |event| {
             std.debug.assert(event == .header);
         }
 
         result.is_dying = false;
         result.heartbeat_interval = 0;
-        if (try result.client.readEvent()) |event| {
+        if (try result.client.next()) |event| {
             std.debug.assert(event == .chunk);
 
             var fba = std.io.fixedBufferStream(event.chunk.data);
@@ -999,7 +992,7 @@ const DiscordWs = struct {
     }
 
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        while (try self.client.readEvent()) |event| {
+        while (try self.client.next()) |event| {
             // Skip over any remaining chunks. The processor didn't take care of it.
             if (event != .header) continue;
 
@@ -1011,7 +1004,7 @@ const DiscordWs = struct {
                 },
                 .Ping, .Pong => {},
                 .Close => {
-                    const body = (try self.client.readEvent()) orelse {
+                    const body = (try self.client.next()) orelse {
                         std.debug.print("Websocket close frame - {{}}: no reason provided. Reconnecting...\n", .{});
                         return error.ConnectionReset;
                     };
@@ -1077,7 +1070,7 @@ const DiscordWs = struct {
     }
 
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        const event = (try self.client.readEvent()) orelse return error.NoBody;
+        const event = (try self.client.next()) orelse return error.NoBody;
         std.debug.assert(event == .chunk);
 
         var name_buf: [32]u8 = undefined;
@@ -1137,8 +1130,8 @@ const DiscordWs = struct {
         const held = self.write_mutex.acquire();
         defer held.release();
 
-        try self.client.writeMessageHeader(.{ .length = msg.len, .opcode = .Text });
-        try self.client.writeMessagePayload(msg);
+        try self.client.writeHeader(.{ .opcode = .Text, .length = msg.len });
+        try self.client.writeChunk(msg);
 
         try self.ssl_tunnel.conn.flush();
     }
