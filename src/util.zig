@@ -174,7 +174,8 @@ pub fn StreamJson(comptime Reader: type) type {
                             return 0;
                         }
 
-                        for (buffer) |*c, i| {
+                        var i: usize = 0;
+                        while (i < buffer.len) : (i += 1) {
                             const byte = try self.ctx.nextByte();
 
                             if (try self.ctx.feed(byte)) |token| {
@@ -184,7 +185,7 @@ pub fn StreamJson(comptime Reader: type) type {
                                 const next = try self.ctx.nextByte();
                                 std.debug.assert((try self.ctx.feed(next)) == null);
 
-                                c.* = switch (next) {
+                                buffer[i] = switch (next) {
                                     '"' => '"',
                                     '/' => '/',
                                     '\\' => '\\',
@@ -194,14 +195,35 @@ pub fn StreamJson(comptime Reader: type) type {
                                     'b' => 0x08, // backspace
                                     'f' => 0x0C, // form feed
                                     'u' => {
-                                        // TODO: handle unicode escapes
-                                        return error.InvalidEscapeCharacter;
+                                        var hexes: [4]u8 = undefined;
+                                        for (hexes) |*hex| {
+                                            hex.* = try self.ctx.nextByte();
+                                            std.debug.assert((try self.ctx.feed(hex.*)) == null);
+                                        }
+                                        const MASK = 0b111111;
+                                        const charpoint = std.fmt.parseInt(u16, &hexes, 16) catch unreachable;
+                                        switch (charpoint) {
+                                            0...0x7F => buffer[i] = @intCast(u8, charpoint),
+                                            0x80...0x07FF => {
+                                                buffer[i] = 0xC0 | @intCast(u8, charpoint >> 6);
+                                                i += 1;
+                                                buffer[i] = 0x80 | @intCast(u8, charpoint & MASK);
+                                            },
+                                            0x0800...0xFFFF => {
+                                                buffer[i] = 0xE0 | @intCast(u8, charpoint >> 12);
+                                                i += 1;
+                                                buffer[i] = 0x80 | @intCast(u8, charpoint >> 6 & MASK);
+                                                i += 1;
+                                                buffer[i] = 0x80 | @intCast(u8, charpoint & MASK);
+                                            },
+                                        }
+                                        continue;
                                     },
                                     // should have been handled by the internal parser
                                     else => unreachable,
                                 };
                             } else {
-                                c.* = byte;
+                                buffer[i] = byte;
                             }
                         }
 
@@ -603,6 +625,64 @@ test "string escapes" {
         expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
         std.testing.expectEqualStrings("hello\nworld\t", try element.stringBuffer(&buffer));
+    }
+}
+
+test "string unicode escape" {
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"\u0024"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("$", try element.stringBuffer(&buffer));
+    }
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"\u00A2"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("¢", try element.stringBuffer(&buffer));
+    }
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"\u0939"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("ह", try element.stringBuffer(&buffer));
+    }
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"\u20AC"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("€", try element.stringBuffer(&buffer));
+    }
+    {
+        var fbs = std.io.fixedBufferStream(
+            \\"\uD55C"
+        );
+        var stream = streamJson(fbs.reader());
+
+        const element = try stream.root();
+        expectEqual(element.kind, .String);
+        var buffer: [100]u8 = undefined;
+        std.testing.expectEqualStrings("한", try element.stringBuffer(&buffer));
     }
 }
 
