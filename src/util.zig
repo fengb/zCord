@@ -369,7 +369,26 @@ pub fn StreamJson(comptime Reader: type) type {
                 return true;
             }
 
+            /// Dump the rest of this element into a writer.
+            /// Warning: this consumes the stream contents.
+            pub fn debugDump(self: Element, writer: anytype) !void {
+                const Context = struct {
+                    element: Element,
+                    writer: @TypeOf(writer),
+
+                    pub fn feed(s: @This(), byte: u8) !?std_json.Token {
+                        try s.writer.writeByte(byte);
+                        return try s.element.ctx.feed(byte);
+                    }
+                };
+                _ = try self.finalizeTokenWithCustomFeeder(Context{ .element = self, .writer = writer });
+            }
+
             pub fn finalizeToken(self: Element) Error!?std_json.Token {
+                return self.finalizeTokenWithCustomFeeder(self.ctx);
+            }
+
+            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?std_json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
                         std.debug.assert(self.element_number == self.ctx.element_number);
@@ -391,7 +410,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                 while (true) {
                     const byte = try self.ctx.nextByte();
-                    if (try self.ctx.feed(byte)) |token| {
+                    if (try feeder.feed(byte)) |token| {
                         switch (self.kind) {
                             .Boolean => std.debug.assert(token == .True or token == .False),
                             .Null => std.debug.assert(token == .Null),
@@ -858,6 +877,7 @@ test "object match not found" {
     var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
+    try root.debugDump(std.io.getStdErr().writer());
     expectEqual(root.kind, .Object);
 
     expectEqual(try root.objectMatch("???"), null);
