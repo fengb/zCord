@@ -148,8 +148,8 @@ pub fn StreamJson(comptime Reader: type) type {
 
                     if (try self.ctx.feed(byte)) |token| {
                         const len = i + 1;
-                        std.debug.assert(token == .Number);
-                        std.debug.assert(token.Number.count == len);
+                        self.ctx.assert(token == .Number);
+                        self.ctx.assert(token.Number.count == len);
                         return buffer[0..len];
                     } else {
                         c.* = byte;
@@ -179,11 +179,11 @@ pub fn StreamJson(comptime Reader: type) type {
                             const byte = try self.ctx.nextByte();
 
                             if (try self.ctx.feed(byte)) |token| {
-                                std.debug.assert(token == .String);
+                                self.ctx.assert(token == .String);
                                 return i;
                             } else if (byte == '\\') {
                                 const next = try self.ctx.nextByte();
-                                std.debug.assert((try self.ctx.feed(next)) == null);
+                                self.ctx.assert((try self.ctx.feed(next)) == null);
 
                                 buffer[i] = switch (next) {
                                     '"' => '"',
@@ -198,7 +198,7 @@ pub fn StreamJson(comptime Reader: type) type {
                                         var hexes: [4]u8 = undefined;
                                         for (hexes) |*hex| {
                                             hex.* = try self.ctx.nextByte();
-                                            std.debug.assert((try self.ctx.feed(hex.*)) == null);
+                                            self.ctx.assert((try self.ctx.feed(hex.*)) == null);
                                         }
                                         const MASK = 0b111111;
                                         const charpoint = std.fmt.parseInt(u16, &hexes, 16) catch unreachable;
@@ -260,7 +260,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 // Scan for next element
                 while (self.ctx.parser.state == .ValueEnd) {
                     if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
-                        std.debug.assert(token == .ArrayEnd);
+                        self.ctx.assert(token == .ArrayEnd);
                         return null;
                     }
                 }
@@ -287,16 +287,22 @@ pub fn StreamJson(comptime Reader: type) type {
                         return null;
                     }
 
+                    // This object has been closed out. *Probably* due to number parsing
+                    // TODO: evaluate to see if this is actually robust
+                    if (self.ctx.parser.stack_used < self.stack_level) {
+                        return null;
+                    }
+
                     // Scan for next element
                     while (self.ctx.parser.state == .ValueEnd) {
                         if (try self.ctx.feed(try self.ctx.nextByte())) |token| {
-                            std.debug.assert(token == .ObjectEnd);
+                            self.ctx.assert(token == .ObjectEnd);
                             return null;
                         }
                     }
 
                     const key_element = (try Element.init(self.ctx)) orelse return null;
-                    std.debug.assert(key_element.kind == .String);
+                    self.ctx.assert(key_element.kind == .String);
 
                     const key_match = try key_element.stringFind(keys);
 
@@ -320,7 +326,7 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             fn stringFind(self: Element, checks: []const []const u8) !?[]const u8 {
-                std.debug.assert(self.kind == .String);
+                self.ctx.assert(self.kind == .String);
 
                 var last_byte: u8 = undefined;
                 var prev_match: []const u8 = &[0]u8{};
@@ -345,7 +351,7 @@ pub fn StreamJson(comptime Reader: type) type {
                     {
                         last_byte = try self.ctx.nextByte();
                         if (try self.ctx.feed(last_byte)) |token| {
-                            std.debug.assert(token == .String);
+                            self.ctx.assert(token == .String);
                             string_complete = true;
                             if (tail == check.len) {
                                 return check;
@@ -356,7 +362,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                 if (!string_complete) {
                     const token = try self.finalizeToken();
-                    std.debug.assert(token.? == .String);
+                    self.ctx.assert(token.? == .String);
                 }
                 return null;
             }
@@ -391,7 +397,7 @@ pub fn StreamJson(comptime Reader: type) type {
             fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?std_json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
-                        std.debug.assert(self.element_number == self.ctx.element_number);
+                        self.ctx.assert(self.element_number == self.ctx.element_number);
 
                         switch (self.ctx.parser.state) {
                             .ValueEnd, .TopLevelEnd, .ValueBeginNoClosing => return null,
@@ -403,7 +409,7 @@ pub fn StreamJson(comptime Reader: type) type {
                             // Assert the parser state
                             return null;
                         } else {
-                            std.debug.assert(self.ctx.parser.stack_used >= self.stack_level);
+                            self.ctx.assert(self.ctx.parser.stack_used >= self.stack_level);
                         }
                     },
                 }
@@ -412,17 +418,17 @@ pub fn StreamJson(comptime Reader: type) type {
                     const byte = try self.ctx.nextByte();
                     if (try feeder.feed(byte)) |token| {
                         switch (self.kind) {
-                            .Boolean => std.debug.assert(token == .True or token == .False),
-                            .Null => std.debug.assert(token == .Null),
-                            .Number => std.debug.assert(token == .Number),
-                            .String => std.debug.assert(token == .String),
+                            .Boolean => self.ctx.assert(token == .True or token == .False),
+                            .Null => self.ctx.assert(token == .Null),
+                            .Number => self.ctx.assert(token == .Number),
+                            .String => self.ctx.assert(token == .String),
                             .Array => {
                                 if (self.ctx.parser.stack_used >= self.stack_level) {
                                     continue;
                                 }
                                 // Number followed by ArrayEnd generates two tokens at once
                                 // causing raw token assertion to be unreliable.
-                                std.debug.assert(byte == ']');
+                                self.ctx.assert(byte == ']');
                                 return .ArrayEnd;
                             },
                             .Object => {
@@ -431,7 +437,7 @@ pub fn StreamJson(comptime Reader: type) type {
                                 }
                                 // Number followed by ObjectEnd generates two tokens at once
                                 // causing raw token assertion to be unreliable.
-                                std.debug.assert(byte == '}');
+                                self.ctx.assert(byte == '}');
                                 return .ObjectEnd;
                             },
                         }
@@ -455,6 +461,15 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
             }
             ctx.assertFailure("Unexpected state: {s}", .{ctx.parser.state});
+        }
+
+        fn assert(ctx: Stream, cond: bool) void {
+            if (!cond) {
+                if (debug_buffer) {
+                    ctx.debugDump(std.io.getStdErr().writer()) catch {};
+                }
+                unreachable;
+            }
         }
 
         fn assertFailure(ctx: Stream, comptime fmt: []const u8, args: anytype) void {
@@ -802,6 +817,19 @@ test "array of strings" {
     }
 
     expectEqual(try root.arrayNext(), null);
+}
+
+test "objects ending in number" {
+    var fbs = std.io.fixedBufferStream(
+        \\[{"id":0 },{"id": 1}, {"id": 2}]
+    );
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    const obj = (try root.arrayNext()).?;
+    if (try obj.objectMatch("banana")) |_| {
+        std.debug.panic("How did this match?", .{});
+    }
 }
 
 test "empty object" {
