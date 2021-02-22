@@ -820,16 +820,16 @@ pub fn main() !void {
 const DiscordWs = struct {
     allocator: *std.mem.Allocator,
 
-    is_dying: bool,
     ssl_tunnel: *request.SslTunnel,
 
     client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
     client_buffer: []u8,
     write_mutex: std.Thread.Mutex,
 
-    heartbeat_interval: usize,
+    heartbeat_interval_ms: usize,
     heartbeat_seq: ?usize,
     heartbeat_ack: bool,
+    heartbeat_terminate: util.Mailbox(void),
     heartbeat_thread: *std.Thread,
 
     const Opcode = enum {
@@ -918,8 +918,7 @@ const DiscordWs = struct {
             std.debug.assert(event == .header);
         }
 
-        result.is_dying = false;
-        result.heartbeat_interval = 0;
+        result.heartbeat_interval_ms = 0;
         if (try result.client.next()) |event| {
             std.debug.assert(event == .chunk);
 
@@ -938,7 +937,7 @@ const DiscordWs = struct {
                     },
                     swh.case("d") => {
                         while (try match.value.objectMatch("heartbeat_interval")) |hbi| {
-                            result.heartbeat_interval = try hbi.value.number(u32);
+                            result.heartbeat_interval_ms = try hbi.value.number(u32);
                         }
                     },
                     else => unreachable,
@@ -946,7 +945,7 @@ const DiscordWs = struct {
             }
         }
 
-        if (result.heartbeat_interval == 0) {
+        if (result.heartbeat_interval_ms == 0) {
             return error.MalformedHelloResponse;
         }
 
@@ -977,6 +976,7 @@ const DiscordWs = struct {
 
         result.heartbeat_seq = null;
         result.heartbeat_ack = true;
+        result.heartbeat_terminate = util.Mailbox(void).init();
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
         return result;
@@ -984,10 +984,9 @@ const DiscordWs = struct {
 
     pub fn deinit(self: *DiscordWs) void {
         self.ssl_tunnel.deinit();
-
-        self.is_dying = true;
+        self.heartbeat_terminate.putOverwrite({});
+        // Reap the thread
         self.heartbeat_thread.wait();
-
         self.allocator.destroy(self);
     }
 
@@ -1139,16 +1138,9 @@ const DiscordWs = struct {
     pub extern "c" fn shutdown(sockfd: std.os.fd_t, how: c_int) c_int;
 
     fn heartbeatHandler(self: *DiscordWs) void {
-        while (true) {
-            const start = std.time.milliTimestamp();
-            // Buffer to fire early than late
-            while (std.time.milliTimestamp() - start < self.heartbeat_interval - 1000) {
-                std.time.sleep(std.time.ns_per_s);
-                if (self.is_dying) {
-                    return;
-                }
-            }
-
+        // Force fire the heartbeat earlier
+        const timeout_ms = self.heartbeat_interval_ms - 1000;
+        while (self.heartbeat_terminate.getWithTimeout(timeout_ms * std.time.ns_per_ms) == null) {
             if (!self.heartbeat_ack) {
                 std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
                 const SHUT_RDWR = 2;

@@ -1066,13 +1066,30 @@ pub fn Mailbox(comptime T: type) type {
                 self.value = null;
                 return value;
             } else {
-                // TODO: fix stdlib so this works:
-                // self.cond.wait(&self.mutex);
-                const rc = std.os.system.pthread_cond_wait(&self.cond.impl.cond, &self.mutex.impl.pthread_mutex);
-                std.debug.assert(rc == 0);
+                self.cond.wait(&self.mutex);
 
                 defer self.value = null;
                 return self.value.?;
+            }
+        }
+
+        pub fn getWithTimeout(self: *Self, timeout_ns: u64) ?T {
+            const held = self.mutex.acquire();
+            defer held.release();
+
+            if (self.value) |value| {
+                self.value = null;
+                return value;
+            } else {
+                const future_ns = std.time.nanoTimestamp() + timeout_ns;
+                var future: std.os.timespec = undefined;
+                future.tv_sec = @intCast(@TypeOf(future.tv_sec), @divFloor(future_ns, std.time.ns_per_s));
+                future.tv_nsec = @intCast(@TypeOf(future.tv_nsec), @mod(future_ns, std.time.ns_per_s));
+
+                const rc = std.os.system.pthread_cond_timedwait(&self.cond.impl.cond, &self.mutex.impl.pthread_mutex, &future);
+                std.debug.assert(rc == 0 or rc == std.os.system.ETIMEDOUT);
+                defer self.value = null;
+                return self.value;
             }
         }
 
