@@ -715,106 +715,95 @@ pub fn main() !void {
         std.os.getenv("GITHUB_AUTH"),
     );
 
-    var reconnect_wait: u64 = 1;
-    while (true) {
-        var discord_ws = DiscordWs.init(
-            context.allocator,
-            context.auth_token,
-            DiscordWs.Intents{ .guild_messages = true },
-        ) catch |err| {
-            std.debug.print("Connect error: {s}\n", .{@errorName(err)});
-            std.time.sleep(reconnect_wait * std.time.ns_per_s);
-            reconnect_wait = std.math.min(reconnect_wait * 2, 30);
-            continue;
-        };
-        reconnect_wait = 1;
+    var discord_ws = try DiscordWs.init(
+        context.allocator,
+        context.auth_token,
+        DiscordWs.Intents{ .guild_messages = true },
+    );
 
-        defer discord_ws.deinit();
+    defer discord_ws.deinit();
 
-        discord_ws.run(context, struct {
-            fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
-                if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
+    discord_ws.run(context, struct {
+        fn handleDispatch(ctx: *Context, name: []const u8, data: anytype) !void {
+            if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-                var ask: Buffer(0x1000) = .{};
-                var channel_id: ?u64 = null;
+            var ask: Buffer(0x1000) = .{};
+            var channel_id: ?u64 = null;
 
-                while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
-                    const swh = util.Swhash(16);
-                    switch (swh.match(match.key)) {
-                        swh.case("content") => {
-                            ask = try findAsk(try match.value.stringReader());
-                            _ = try match.value.finalizeToken();
-                        },
-                        swh.case("channel_id") => {
-                            var buf: [0x100]u8 = undefined;
-                            const channel_string = try match.value.stringBuffer(&buf);
-                            channel_id = try std.fmt.parseInt(u64, channel_string, 10);
-                        },
-                        else => unreachable,
-                    }
-                }
-
-                if (ask.len > 0 and channel_id != null) {
-                    std.debug.print(">> %%{s}\n", .{ask.slice()});
-                    ctx.ask_mailbox.putOverwrite(.{ .channel_id = channel_id.?, .ask = ask });
+            while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
+                const swh = util.Swhash(16);
+                switch (swh.match(match.key)) {
+                    swh.case("content") => {
+                        ask = try findAsk(try match.value.stringReader());
+                        _ = try match.value.finalizeToken();
+                    },
+                    swh.case("channel_id") => {
+                        var buf: [0x100]u8 = undefined;
+                        const channel_string = try match.value.stringBuffer(&buf);
+                        channel_id = try std.fmt.parseInt(u64, channel_string, 10);
+                    },
+                    else => unreachable,
                 }
             }
 
-            fn findAsk(reader: anytype) !Buffer(0x1000) {
-                const State = enum {
-                    no_match,
-                    percent,
-                    ready,
-                    endless,
-                };
-                var state = State.no_match;
-                var buffer: Buffer(0x1000) = .{};
-
-                while (reader.readByte()) |c| {
-                    switch (state) {
-                        .no_match => {
-                            if (c == '%') {
-                                state = .percent;
-                            }
-                        },
-                        .percent => {
-                            state = if (c == '%') .ready else .no_match;
-                        },
-                        .ready => {
-                            switch (c) {
-                                ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => {
-                                    if (std.mem.eql(u8, buffer.slice(), "run")) {
-                                        state = .endless;
-                                        try buffer.append(c);
-                                    } else {
-                                        break;
-                                    }
-                                },
-                                else => try buffer.append(c),
-                            }
-                        },
-                        .endless => try buffer.append(c),
-                    }
-                } else |err| switch (err) {
-                    error.EndOfStream => {},
-                    else => |e| return e,
-                }
-
-                // Strip trailing period
-                if (buffer.last() == @as(u8, '.')) {
-                    _ = buffer.pop() catch unreachable;
-                }
-                return buffer;
+            if (ask.len > 0 and channel_id != null) {
+                std.debug.print(">> %%{s}\n", .{ask.slice()});
+                ctx.ask_mailbox.putOverwrite(.{ .channel_id = channel_id.?, .ask = ask });
             }
-        }) catch |err| switch (err) {
-            // TODO: investigate if IO localized enough. And possibly convert to ConnectionReset
-            error.ConnectionReset, error.IO => continue,
-            error.AuthenticationFailed => |e| return e,
-            else => @panic(@errorName(err)),
-        };
+        }
 
-        std.debug.print("Exited: {}\n", .{discord_ws.client});
-    }
+        fn findAsk(reader: anytype) !Buffer(0x1000) {
+            const State = enum {
+                no_match,
+                percent,
+                ready,
+                endless,
+            };
+            var state = State.no_match;
+            var buffer: Buffer(0x1000) = .{};
+
+            while (reader.readByte()) |c| {
+                switch (state) {
+                    .no_match => {
+                        if (c == '%') {
+                            state = .percent;
+                        }
+                    },
+                    .percent => {
+                        state = if (c == '%') .ready else .no_match;
+                    },
+                    .ready => {
+                        switch (c) {
+                            ' ', ',', '\n', '\t', '(', ')', '!', '?', '[', ']', '{', '}' => {
+                                if (std.mem.eql(u8, buffer.slice(), "run")) {
+                                    state = .endless;
+                                    try buffer.append(c);
+                                } else {
+                                    break;
+                                }
+                            },
+                            else => try buffer.append(c),
+                        }
+                    },
+                    .endless => try buffer.append(c),
+                }
+            } else |err| switch (err) {
+                error.EndOfStream => {},
+                else => |e| return e,
+            }
+
+            // Strip trailing period
+            if (buffer.last() == @as(u8, '.')) {
+                _ = buffer.pop() catch unreachable;
+            }
+            return buffer;
+        }
+    }) catch |err| switch (err) {
+        error.AuthenticationFailed => |e| return e,
+        else => @panic(@errorName(err)),
+    };
+
+    std.debug.print("Exited: {}\n", .{discord_ws.client});
 }
 
 const DiscordWs = struct {
@@ -1011,15 +1000,32 @@ const DiscordWs = struct {
     fn disconnect(self: *DiscordWs) void {
         if (self.ssl_tunnel) |ssl_tunnel| {
             ssl_tunnel.deinit();
+            self.ssl_tunnel = null;
         }
     }
 
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        self.heartbeat_mailbox.putOverwrite(.{ .start = try self.connect() });
-        defer self.disconnect();
+        var reconnect_wait: u64 = 1;
+        while (true) {
+            const info = self.connect() catch |err| {
+                std.debug.print("Connect error: {s}\n", .{@errorName(err)});
+                std.time.sleep(reconnect_wait * std.time.ns_per_s);
+                reconnect_wait = std.math.min(reconnect_wait * 2, 30);
+                continue;
+            };
 
-        try self.listen(ctx, handler);
-        // TODO: handle reconnect
+            reconnect_wait = 1;
+
+            self.heartbeat_mailbox.putOverwrite(.{ .start = info });
+            defer self.disconnect();
+
+            self.listen(ctx, handler) catch |err| switch (err) {
+                // TODO: handle reconnect better
+                // IO comes from BearSSL
+                error.ConnectionReset, error.IO => continue,
+                else => |e| return e,
+            };
+        }
     }
 
     pub fn listen(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
@@ -1098,6 +1104,9 @@ const DiscordWs = struct {
                 else => return error.WtfWtf,
             }
         }
+
+        std.debug.print("Websocket close frame - {{}}: no reason provided. Reconnecting...\n", .{});
+        return error.ConnectionReset;
     }
 
     pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
