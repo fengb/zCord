@@ -820,19 +820,27 @@ pub fn main() !void {
 const DiscordWs = struct {
     allocator: *std.mem.Allocator,
 
-    ssl_tunnel: *request.SslTunnel,
+    auth_token: []const u8,
+    intents: Intents,
 
+    ssl_tunnel: ?*request.SslTunnel,
     client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
     client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
-    heartbeat_interval_ms: usize,
     heartbeat_seq: ?usize,
     heartbeat_ack: bool,
     heartbeat_mailbox: util.Mailbox(HeartbeatMessage),
     heartbeat_thread: *std.Thread,
 
-    const HeartbeatMessage = enum { start, terminate };
+    const HeartbeatMessage = union(enum) {
+        start: ConnectInfo,
+        terminate: void,
+    };
+
+    const ConnectInfo = struct {
+        heartbeat_interval_ms: u64,
+    };
 
     const Opcode = enum {
         /// An event was dispatched.
@@ -891,34 +899,58 @@ const DiscordWs = struct {
         errdefer allocator.destroy(result);
         result.allocator = allocator;
 
+        result.auth_token = auth_token;
+        result.intents = intents;
+
+        result.ssl_tunnel = null;
         result.write_mutex = .{};
 
-        result.ssl_tunnel = try request.SslTunnel.init(.{
-            .allocator = allocator,
+        result.heartbeat_seq = null;
+        result.heartbeat_ack = true;
+        result.heartbeat_mailbox = util.Mailbox(HeartbeatMessage).init();
+        result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
+
+        return result;
+    }
+
+    pub fn deinit(self: *DiscordWs) void {
+        if (self.ssl_tunnel) |ssl_tunnel| {
+            ssl_tunnel.deinit();
+        }
+        self.heartbeat_mailbox.putOverwrite(.terminate);
+        // Reap the thread
+        self.heartbeat_thread.wait();
+        self.allocator.destroy(self);
+    }
+
+    fn connect(self: *DiscordWs) !ConnectInfo {
+        std.debug.assert(self.ssl_tunnel == null);
+        self.ssl_tunnel = try request.SslTunnel.init(.{
+            .allocator = self.allocator,
             .pem = @embedFile("../discord-gg-chain.pem"),
             .host = "gateway.discord.gg",
         });
-        errdefer result.ssl_tunnel.deinit();
+        errdefer self.ssl_tunnel.?.deinit();
 
-        result.client = wz.base.client.create(
-            &result.client_buffer,
-            result.ssl_tunnel.conn.reader(),
-            result.ssl_tunnel.conn.writer(),
+        self.client = wz.base.client.create(
+            &self.client_buffer,
+            self.ssl_tunnel.?.conn.reader(),
+            self.ssl_tunnel.?.conn.writer(),
         );
 
         // Handshake
-        try result.client.handshakeStart("/?v=6&encoding=json");
-        try result.client.handshakeAddHeaderValue("Host", "gateway.discord.gg");
-        try result.client.handshake_client.finishHeaders(); // needed due to SSL flushing
-        try result.ssl_tunnel.conn.flush();
-        try result.client.handshakeFinish();
+        try self.client.handshakeStart("/?v=6&encoding=json");
+        try self.client.handshakeAddHeaderValue("Host", "gateway.discord.gg");
+        try self.client.handshake_client.finishHeaders(); // needed due to SSL flushing
+        try self.ssl_tunnel.?.conn.flush();
+        try self.client.handshakeFinish();
 
-        if (try result.client.next()) |event| {
+        if (try self.client.next()) |event| {
             std.debug.assert(event == .header);
         }
 
-        result.heartbeat_interval_ms = 0;
-        if (try result.client.next()) |event| {
+        var result = ConnectInfo{ .heartbeat_interval_ms = 0 };
+        if (try self.client.next()) |event| {
             std.debug.assert(event == .chunk);
 
             var fba = std.io.fixedBufferStream(event.chunk.data);
@@ -953,10 +985,10 @@ const DiscordWs = struct {
             name: []const u8,
         };
 
-        try result.sendCommand(.identify, .{
+        try self.sendCommand(.identify, .{
             .compress = false,
-            .intents = intents.toRaw(),
-            .token = auth_token,
+            .intents = self.intents.toRaw(),
+            .token = self.auth_token,
             .properties = .{
                 .@"$os" = @tagName(std.Target.current.os.tag),
                 .@"$browser" = agent,
@@ -973,24 +1005,19 @@ const DiscordWs = struct {
             },
         });
 
-        result.heartbeat_seq = null;
-        result.heartbeat_ack = true;
-        result.heartbeat_mailbox = util.Mailbox(HeartbeatMessage).init();
-        result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
-
         return result;
     }
 
-    pub fn deinit(self: *DiscordWs) void {
-        self.ssl_tunnel.deinit();
-        self.heartbeat_mailbox.putOverwrite(.terminate);
-        // Reap the thread
-        self.heartbeat_thread.wait();
-        self.allocator.destroy(self);
+    fn disconnect(self: *DiscordWs) void {
+        if (self.ssl_tunnel) |ssl_tunnel| {
+            ssl_tunnel.deinit();
+        }
     }
 
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        self.heartbeat_mailbox.putOverwrite(.start);
+        self.heartbeat_mailbox.putOverwrite(.{ .start = try self.connect() });
+        defer self.disconnect();
+
         try self.listen(ctx, handler);
         // TODO: handle reconnect
     }
@@ -1123,6 +1150,8 @@ const DiscordWs = struct {
     }
 
     pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {
+        const ssl_tunnel = self.ssl_tunnel orelse return error.NotConnected;
+
         var buf: [0x1000]u8 = undefined;
         const msg = try std.fmt.bufPrint(&buf, "{s}", .{
             format.json(.{
@@ -1137,22 +1166,22 @@ const DiscordWs = struct {
         try self.client.writeHeader(.{ .opcode = .Text, .length = msg.len });
         try self.client.writeChunk(msg);
 
-        try self.ssl_tunnel.conn.flush();
+        try ssl_tunnel.conn.flush();
     }
 
     pub extern "c" fn shutdown(sockfd: std.os.fd_t, how: c_int) c_int;
 
     fn heartbeatHandler(self: *DiscordWs) void {
-        var running = false;
+        var heartbeat_interval_ms: u64 = 0;
         while (true) {
-            if (!running) {
+            if (heartbeat_interval_ms == 0) {
                 switch (self.heartbeat_mailbox.get()) {
-                    .start => running = true,
+                    .start => |info| heartbeat_interval_ms = info.heartbeat_interval_ms,
                     .terminate => return,
                 }
             } else {
                 // Force fire the heartbeat earlier
-                const timeout_ms = self.heartbeat_interval_ms - 1000;
+                const timeout_ms = heartbeat_interval_ms - 1000;
                 if (self.heartbeat_mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
                         .start => unreachable,
@@ -1161,30 +1190,23 @@ const DiscordWs = struct {
                     continue;
                 }
 
-                if (!self.heartbeat_ack) {
+                if (self.heartbeat_ack) {
+                    self.heartbeat_ack = false;
+                    if (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
+                        std.debug.print(">> ♡\n", .{});
+                        continue;
+                    } else |_| {
+                        std.debug.print("Heartbeat send failed. Reconnecting...\n", .{});
+                    }
+                } else {
                     std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
-                    const SHUT_RDWR = 2;
-                    const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
-                    if (rc != 0) {
-                        std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
-                    }
-                    running = false;
-                    continue;
                 }
-
-                self.heartbeat_ack = false;
-
-                if (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
-                    std.debug.print(">> ♡\n", .{});
-                } else |_| {
-                    const SHUT_RDWR = 2;
-                    const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
-                    if (rc != 0) {
-                        std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
-                    }
-                    running = false;
-                    continue;
+                const SHUT_RDWR = 2;
+                const rc = shutdown(self.ssl_tunnel.?.tcp_conn.handle, SHUT_RDWR);
+                if (rc != 0) {
+                    std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
                 }
+                heartbeat_interval_ms = 0;
             }
         }
     }
