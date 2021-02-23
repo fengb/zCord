@@ -823,14 +823,16 @@ const DiscordWs = struct {
     ssl_tunnel: *request.SslTunnel,
 
     client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
-    client_buffer: []u8,
+    client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
     heartbeat_interval_ms: usize,
     heartbeat_seq: ?usize,
     heartbeat_ack: bool,
-    heartbeat_terminate: util.Mailbox(void),
+    heartbeat_mailbox: util.Mailbox(HeartbeatMessage),
     heartbeat_thread: *std.Thread,
+
+    const HeartbeatMessage = enum { start, terminate };
 
     const Opcode = enum {
         /// An event was dispatched.
@@ -898,11 +900,8 @@ const DiscordWs = struct {
         });
         errdefer result.ssl_tunnel.deinit();
 
-        result.client_buffer = try allocator.alloc(u8, 0x1000);
-        errdefer allocator.free(result.client_buffer);
-
         result.client = wz.base.client.create(
-            result.client_buffer,
+            &result.client_buffer,
             result.ssl_tunnel.conn.reader(),
             result.ssl_tunnel.conn.writer(),
         );
@@ -976,7 +975,7 @@ const DiscordWs = struct {
 
         result.heartbeat_seq = null;
         result.heartbeat_ack = true;
-        result.heartbeat_terminate = util.Mailbox(void).init();
+        result.heartbeat_mailbox = util.Mailbox(HeartbeatMessage).init();
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
         return result;
@@ -984,13 +983,19 @@ const DiscordWs = struct {
 
     pub fn deinit(self: *DiscordWs) void {
         self.ssl_tunnel.deinit();
-        self.heartbeat_terminate.putOverwrite({});
+        self.heartbeat_mailbox.putOverwrite(.terminate);
         // Reap the thread
         self.heartbeat_thread.wait();
         self.allocator.destroy(self);
     }
 
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
+        self.heartbeat_mailbox.putOverwrite(.start);
+        try self.listen(ctx, handler);
+        // TODO: handle reconnect
+    }
+
+    pub fn listen(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         while (try self.client.next()) |event| {
             // Skip over any remaining chunks. The processor didn't take care of it.
             if (event != .header) continue;
@@ -1138,36 +1143,47 @@ const DiscordWs = struct {
     pub extern "c" fn shutdown(sockfd: std.os.fd_t, how: c_int) c_int;
 
     fn heartbeatHandler(self: *DiscordWs) void {
-        // Force fire the heartbeat earlier
-        const timeout_ms = self.heartbeat_interval_ms - 1000;
-        while (self.heartbeat_terminate.getWithTimeout(timeout_ms * std.time.ns_per_ms) == null) {
-            if (!self.heartbeat_ack) {
-                std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
-                const SHUT_RDWR = 2;
-                const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
-                if (rc != 0) {
-                    std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
+        var running = false;
+        while (true) {
+            if (!running) {
+                switch (self.heartbeat_mailbox.get()) {
+                    .start => running = true,
+                    .terminate => return,
                 }
-                return;
-            }
+            } else {
+                // Force fire the heartbeat earlier
+                const timeout_ms = self.heartbeat_interval_ms - 1000;
+                if (self.heartbeat_mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
+                    switch (msg) {
+                        .start => unreachable,
+                        .terminate => return,
+                    }
+                    continue;
+                }
 
-            self.heartbeat_ack = false;
-
-            var retries: u6 = 0;
-            while (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
-                std.debug.print(">> ♡\n", .{});
-                break;
-            } else |err| {
-                if (retries < 3) {
-                    std.os.nanosleep(@as(u64, 1) << retries, 0);
-                    retries += 1;
-                } else {
+                if (!self.heartbeat_ack) {
+                    std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
                     const SHUT_RDWR = 2;
                     const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
                     if (rc != 0) {
                         std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
                     }
-                    return;
+                    running = false;
+                    continue;
+                }
+
+                self.heartbeat_ack = false;
+
+                if (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
+                    std.debug.print(">> ♡\n", .{});
+                } else |_| {
+                    const SHUT_RDWR = 2;
+                    const rc = shutdown(self.ssl_tunnel.tcp_conn.handle, SHUT_RDWR);
+                    if (rc != 0) {
+                        std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
+                    }
+                    running = false;
+                    continue;
                 }
             }
         }
