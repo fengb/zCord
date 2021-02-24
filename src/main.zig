@@ -715,11 +715,20 @@ pub fn main() !void {
         std.os.getenv("GITHUB_AUTH"),
     );
 
-    var discord_ws = try DiscordWs.init(
-        context.allocator,
-        context.auth_token,
-        DiscordWs.Intents{ .guild_messages = true },
-    );
+    var discord_ws = try DiscordWs.init(.{
+        .allocator = context.allocator,
+        .auth_token = context.auth_token,
+        .intents = .{ .guild_messages = true },
+        .presence = .{
+            .status = .online,
+            .activities = &.{
+                .{
+                    .type = .Game,
+                    .name = "examples: %%666 or %%std.ArrayList",
+                },
+            },
+        },
+    });
 
     defer discord_ws.deinit();
 
@@ -811,6 +820,7 @@ const DiscordWs = struct {
 
     auth_token: []const u8,
     intents: Intents,
+    presence: Presence,
 
     ssl_tunnel: ?*request.SslTunnel,
     client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
@@ -883,13 +893,53 @@ const DiscordWs = struct {
         }
     };
 
-    pub fn init(allocator: *std.mem.Allocator, auth_token: []const u8, intents: Intents) !*DiscordWs {
-        const result = try allocator.create(DiscordWs);
-        errdefer allocator.destroy(result);
-        result.allocator = allocator;
+    const Presence = struct {
+        status: enum {
+            online,
+            dnd,
+            idle,
+            invisible,
+            offline,
 
-        result.auth_token = auth_token;
-        result.intents = intents;
+            pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
+                try writer.writeAll("\"");
+                try writer.writeAll(@tagName(self));
+                try writer.writeAll("\"");
+            }
+        } = .online,
+        activities: []const Activity = &.{},
+        since: ?u32 = null,
+        afk: bool = false,
+    };
+
+    const Activity = struct {
+        type: enum {
+            Game = 0,
+            Streaming = 1,
+            Listening = 2,
+            Custom = 4,
+            Competing = 5,
+
+            pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
+                try writer.print("{d}", .{@enumToInt(self)});
+            }
+        },
+        name: []const u8,
+    };
+
+    pub fn init(args: struct {
+        allocator: *std.mem.Allocator,
+        auth_token: []const u8,
+        intents: Intents,
+        presence: Presence = .{},
+    }) !*DiscordWs {
+        const result = try args.allocator.create(DiscordWs);
+        errdefer args.allocator.destroy(result);
+        result.allocator = args.allocator;
+
+        result.auth_token = args.auth_token;
+        result.intents = args.intents;
+        result.presence = args.presence;
 
         result.ssl_tunnel = null;
         result.write_mutex = .{};
@@ -969,11 +1019,6 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
-        const Activity = struct {
-            @"type": u8,
-            name: []const u8,
-        };
-
         try self.sendCommand(.identify, .{
             .compress = false,
             .intents = self.intents.toRaw(),
@@ -983,15 +1028,7 @@ const DiscordWs = struct {
                 .@"$browser" = agent,
                 .@"$device" = agent,
             },
-            .presence = .{
-                .status = "online",
-                .activities = &[_]Activity{
-                    .{
-                        .@"type" = 0,
-                        .name = "examples: %%666 or %%std.ArrayList",
-                    },
-                },
-            },
+            .presence = self.presence,
         });
 
         return result;
@@ -1062,20 +1099,20 @@ const DiscordWs = struct {
                         InvalidIntents = 4013,
                         DisallowedIntents = 4014,
 
+                        _,
+
                         pub fn format(code: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
                             try writer.print("{d}: {s}", .{ @enumToInt(code), @tagName(code) });
                         }
                     };
 
                     const code_num = std.mem.readIntBig(u16, body.chunk.data[0..2]);
-                    const code = std.meta.intToEnum(CloseEventCode, std.mem.readIntBig(u16, body.chunk.data[0..2])) catch |err| switch (err) {
-                        error.InvalidEnumTag => {
+                    const code = @intToEnum(CloseEventCode, code_num);
+                    switch (code) {
+                        _ => {
                             std.debug.print("Websocket close frame - {d}: unknown code. Reconnecting...\n", .{code_num});
                             return error.ConnectionReset;
                         },
-                    };
-
-                    switch (code) {
                         .UnknownError, .SessionTimedOut => {
                             std.debug.print("Websocket close frame - {}. Reconnecting...\n", .{code});
                             return error.ConnectionReset;
