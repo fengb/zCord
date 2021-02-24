@@ -834,6 +834,7 @@ const DiscordWs = struct {
 
     const HeartbeatMessage = union(enum) {
         start: ConnectInfo,
+        stop: void,
         terminate: void,
     };
 
@@ -1050,11 +1051,12 @@ const DiscordWs = struct {
                 reconnect_wait = std.math.min(reconnect_wait * 2, 30);
                 continue;
             };
+            defer self.disconnect();
 
             reconnect_wait = 1;
 
             self.heartbeat_mailbox.putOverwrite(.{ .start = info });
-            defer self.disconnect();
+            defer self.heartbeat_mailbox.putOverwrite(.stop);
 
             self.listen(ctx, handler) catch |err| switch (err) {
                 // TODO: handle reconnect better
@@ -1223,6 +1225,7 @@ const DiscordWs = struct {
             if (heartbeat_interval_ms == 0) {
                 switch (self.heartbeat_mailbox.get()) {
                     .start => |info| heartbeat_interval_ms = info.heartbeat_interval_ms,
+                    .stop => {},
                     .terminate => return,
                 }
             } else {
@@ -1230,7 +1233,8 @@ const DiscordWs = struct {
                 const timeout_ms = heartbeat_interval_ms - 1000;
                 if (self.heartbeat_mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
-                        .start => unreachable,
+                        .start => {},
+                        .stop => heartbeat_interval_ms = 0,
                         .terminate => return,
                     }
                     continue;
