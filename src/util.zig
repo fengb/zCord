@@ -1050,13 +1050,9 @@ pub fn Mailbox(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        value: ?T,
-        cond: std.Thread.Condition,
-        mutex: std.Thread.Mutex,
-
-        pub fn init() Self {
-            return Self{ .value = null, .cond = .{ .impl = .{} }, .mutex = .{} };
-        }
+        value: ?T = null,
+        cond: std.Thread.Condition = .{},
+        mutex: std.Thread.Mutex = .{},
 
         pub fn get(self: *Self) T {
             const held = self.mutex.acquire();

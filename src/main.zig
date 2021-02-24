@@ -104,7 +104,7 @@ const Context = struct {
 
         result.timer = try std.time.Timer.start();
 
-        result.ask_mailbox = util.Mailbox(AskData).init();
+        result.ask_mailbox = .{};
         result.ask_thread = try std.Thread.spawn(result, askHandler);
 
         std.os.sigaction(
@@ -947,7 +947,7 @@ const DiscordWs = struct {
 
         result.heartbeat_seq = null;
         result.heartbeat_ack = true;
-        result.heartbeat_mailbox = util.Mailbox(HeartbeatMessage).init();
+        result.heartbeat_mailbox = .{};
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
         return result;
