@@ -588,28 +588,22 @@ const Context = struct {
             .stderr = stderr_buf[0..0],
         };
 
-        while (try root.objectMatchAny(&[_][]const u8{
-            "stdout",
-            "stderr",
-        })) |match| {
-            const swh = util.Swhash(16);
-            switch (swh.match(match.key)) {
-                swh.case("stdout") => {
-                    result.stdout = match.value.stringBuffer(stdout_buf) catch |err| switch (err) {
-                        error.NoSpaceLeft => stdout_buf,
-                        else => |e| return e,
-                    };
-                },
-                swh.case("stderr") => {
-                    result.stderr = match.value.stringBuffer(stderr_buf) catch |err| switch (err) {
-                        error.NoSpaceLeft => stderr_buf,
-                        else => |e| return e,
-                    };
-                },
-                else => unreachable,
-            }
-            _ = try match.value.finalizeToken();
-        }
+        while (try root.objectMatchUnion(enum { stdout, stderr })) |match| switch (match) {
+            .stdout => |el_stdout| {
+                result.stdout = el_stdout.stringBuffer(stdout_buf) catch |err| switch (err) {
+                    error.NoSpaceLeft => stdout_buf,
+                    else => |e| return e,
+                };
+                _ = try el_stdout.finalizeToken();
+            },
+            .stderr => |el_stderr| {
+                result.stderr = el_stderr.stringBuffer(stderr_buf) catch |err| switch (err) {
+                    error.NoSpaceLeft => stderr_buf,
+                    else => |e| return e,
+                };
+                _ = try el_stderr.finalizeToken();
+            },
+        };
         return result;
     }
 
@@ -656,21 +650,19 @@ const Context = struct {
         const root = try stream.root();
 
         var result = GithubIssue{ .repo = Buffer(0x100).initFrom(repo), .number = 0, .title = .{}, .url = .{} };
-        while (try root.objectMatchAny(&[_][]const u8{ "number", "title", "html_url" })) |match| {
-            const swh = util.Swhash(16);
-            switch (swh.match(match.key)) {
-                swh.case("number") => {
-                    result.number = try match.value.number(u32);
+        while (try root.objectMatchUnion(enum { number, title, html_url })) |match| {
+            switch (match) {
+                .number => |el_number| {
+                    result.number = try el_number.number(u32);
                 },
-                swh.case("html_url") => {
-                    const slice = try match.value.stringBuffer(&result.url.data);
+                .html_url => |el_url| {
+                    const slice = try el_url.stringBuffer(&result.url.data);
                     result.url.len = slice.len;
                 },
-                swh.case("title") => {
-                    const slice = try match.value.stringBuffer(&result.title.data);
+                .title => |el_title| {
+                    const slice = try el_title.stringBuffer(&result.title.data);
                     result.title.len = slice.len;
                 },
-                else => unreachable,
             }
 
             if (result.number > 0 and result.title.len > 0 and result.url.len > 0) {
@@ -739,21 +731,17 @@ pub fn main() !void {
             var ask: Buffer(0x1000) = .{};
             var channel_id: ?u64 = null;
 
-            while (try data.objectMatchAny(&[_][]const u8{ "content", "channel_id" })) |match| {
-                const swh = util.Swhash(16);
-                switch (swh.match(match.key)) {
-                    swh.case("content") => {
-                        ask = try findAsk(try match.value.stringReader());
-                        _ = try match.value.finalizeToken();
-                    },
-                    swh.case("channel_id") => {
-                        var buf: [0x100]u8 = undefined;
-                        const channel_string = try match.value.stringBuffer(&buf);
-                        channel_id = try std.fmt.parseInt(u64, channel_string, 10);
-                    },
-                    else => unreachable,
-                }
-            }
+            while (try data.objectMatchUnion(enum { content, channel_id })) |match| switch (match) {
+                .content => |el_content| {
+                    ask = try findAsk(try el_content.stringReader());
+                    _ = try el_content.finalizeToken();
+                },
+                .channel_id => |el_channel| {
+                    var buf: [0x100]u8 = undefined;
+                    const channel_string = try el_channel.stringBuffer(&buf);
+                    channel_id = try std.fmt.parseInt(u64, channel_string, 10);
+                },
+            };
 
             if (ask.len > 0 and channel_id != null) {
                 std.debug.print(">> %%{s}\n", .{ask.slice()});
@@ -997,23 +985,19 @@ const DiscordWs = struct {
             var stream = util.streamJson(fba.reader());
 
             const root = try stream.root();
-            while (try root.objectMatchAny(&[_][]const u8{ "op", "d" })) |match| {
-                const swh = util.Swhash(2);
-                switch (swh.match(match.key)) {
-                    swh.case("op") => {
-                        const op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
-                        if (op != .hello) {
-                            return error.MalformedHelloResponse;
-                        }
-                    },
-                    swh.case("d") => {
-                        while (try match.value.objectMatch("heartbeat_interval")) |hbi| {
-                            result.heartbeat_interval_ms = try hbi.value.number(u32);
-                        }
-                    },
-                    else => unreachable,
-                }
-            }
+            while (try root.objectMatchUnion(enum { op, d })) |match| switch (match) {
+                .op => |el_op| {
+                    const op = try std.meta.intToEnum(Opcode, try el_op.number(u8));
+                    if (op != .hello) {
+                        return error.MalformedHelloResponse;
+                    }
+                },
+                .d => |el_data| {
+                    while (try el_data.objectMatch("heartbeat_interval")) |hbi| {
+                        result.heartbeat_interval_ms = try hbi.value.number(u32);
+                    }
+                },
+            };
         }
 
         if (result.heartbeat_interval_ms == 0) {
@@ -1052,36 +1036,32 @@ const DiscordWs = struct {
             var stream = util.streamJson(fba.reader());
 
             const root = try stream.root();
-            while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
-                const swh = util.Swhash(2);
-                switch (swh.match(match.key)) {
-                    swh.case("t") => {
-                        var name_buf: [0x100]u8 = undefined;
-                        const name = try match.value.stringBuffer(&name_buf);
-                        if (!std.mem.eql(u8, name, "READY")) {
-                            return error.MalformedIdentify;
-                        }
-                    },
-                    swh.case("s") => {
-                        if (try match.value.optionalNumber(u32)) |seq| {
-                            result.seq = seq;
-                        }
-                    },
-                    swh.case("op") => {
-                        const op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
-                        if (op != .dispatch) {
-                            return error.MalformedIdentify;
-                        }
-                    },
-                    swh.case("d") => {
-                        while (try match.value.objectMatch("session_id")) |session_match| {
-                            const slice = try session_match.value.stringBuffer(&result.session_id.data);
-                            result.session_id.len = slice.len;
-                        }
-                    },
-                    else => unreachable,
-                }
-            }
+            while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
+                .t => |el_type| {
+                    var name_buf: [0x100]u8 = undefined;
+                    const name = try el_type.stringBuffer(&name_buf);
+                    if (!std.mem.eql(u8, name, "READY")) {
+                        return error.MalformedIdentify;
+                    }
+                },
+                .s => |el_seq| {
+                    if (try el_seq.optionalNumber(u32)) |seq| {
+                        result.seq = seq;
+                    }
+                },
+                .op => |el_op| {
+                    const op = try std.meta.intToEnum(Opcode, try el_op.number(u8));
+                    if (op != .dispatch) {
+                        return error.MalformedIdentify;
+                    }
+                },
+                .d => |el_data| {
+                    while (try el_data.objectMatch("session_id")) |session_match| {
+                        const slice = try session_match.value.stringBuffer(&result.session_id.data);
+                        result.session_id.len = slice.len;
+                    }
+                },
+            };
         }
 
         return result;
@@ -1217,40 +1197,37 @@ const DiscordWs = struct {
 
         const root = try stream.root();
 
-        while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
-            const swh = util.Swhash(2);
-            switch (swh.match(match.key)) {
-                swh.case("t") => {
-                    name = try match.value.optionalStringBuffer(&name_buf);
-                },
-                swh.case("s") => {
-                    if (try match.value.optionalNumber(u32)) |seq| {
-                        self.connect_info.?.seq = seq;
-                    }
-                },
-                swh.case("op") => {
-                    op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
-                },
-                swh.case("d") => {
-                    switch (op orelse return error.DataBeforeOp) {
-                        .dispatch => {
-                            try handler.handleDispatch(
-                                ctx,
-                                name orelse return error.DispatchWithoutName,
-                                match.value,
-                            );
-                        },
-                        .heartbeat_ack => {
-                            std.debug.print("<< ♥\n", .{});
-                            self.heartbeat_ack = true;
-                        },
-                        else => {},
-                    }
-                    _ = try match.value.finalizeToken();
-                },
-                else => unreachable,
-            }
-        }
+        while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
+            .t => |el_type| {
+                name = try el_type.optionalStringBuffer(&name_buf);
+            },
+            .s => |el_seq| {
+                if (try el_seq.optionalNumber(u32)) |seq| {
+                    self.connect_info.?.seq = seq;
+                }
+            },
+            .op => |el_op| {
+                op = try std.meta.intToEnum(Opcode, try el_op.number(u8));
+            },
+            .d => |el_data| {
+                switch (op orelse return error.DataBeforeOp) {
+                    .dispatch => {
+                        std.debug.print("<< {d} -- {s}\n", .{ self.connect_info.?.seq, name });
+                        try handler.handleDispatch(
+                            ctx,
+                            name orelse return error.DispatchWithoutName,
+                            el_data,
+                        );
+                    },
+                    .heartbeat_ack => {
+                        std.debug.print("<< ♥\n", .{});
+                        self.heartbeat_ack = true;
+                    },
+                    else => {},
+                }
+                _ = try el_data.finalizeToken();
+            },
+        };
     }
 
     pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {

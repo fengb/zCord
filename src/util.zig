@@ -274,16 +274,48 @@ pub fn StreamJson(comptime Reader: type) type {
                 return try Element.init(self.ctx);
             }
 
-            const ObjectMatch = struct {
+            fn ObjectMatchUnion(comptime TagType: type) type {
+                comptime var union_fields: []const std.builtin.TypeInfo.UnionField = &.{};
+                inline for (std.meta.fields(TagType)) |field| {
+                    union_fields = union_fields ++ [_]std.builtin.TypeInfo.UnionField{.{
+                        .name = field.name,
+                        .field_type = Element,
+                        .alignment = @alignOf(Element),
+                    }};
+                }
+
+                const Tagged = union(enum) { temp };
+                var info = @typeInfo(Tagged);
+                info.Union.tag_type = TagType;
+                info.Union.fields = union_fields;
+                return @Type(info);
+            }
+
+            pub fn objectMatchUnion(self: Element, comptime Enum: type) !?ObjectMatchUnion(Enum) {
+                comptime var string_keys: []const []const u8 = &.{};
+                inline for (std.meta.fields(Enum)) |field| {
+                    string_keys = string_keys ++ [_][]const u8{field.name};
+                }
+
+                const raw_match = (try self.objectMatchAny(string_keys)) orelse return null;
+                inline for (string_keys) |key| {
+                    if (std.mem.eql(u8, key, raw_match.key)) {
+                        return @unionInit(ObjectMatchUnion(Enum), key, raw_match.value);
+                    }
+                }
+                unreachable;
+            }
+
+            const ObjectMatchString = struct {
                 key: []const u8,
                 value: Element,
             };
 
-            pub fn objectMatch(self: Element, key: []const u8) Error!?ObjectMatch {
+            pub fn objectMatch(self: Element, key: []const u8) Error!?ObjectMatchString {
                 return self.objectMatchAny(&[_][]const u8{key});
             }
 
-            pub fn objectMatchAny(self: Element, keys: []const []const u8) Error!?ObjectMatch {
+            pub fn objectMatchAny(self: Element, keys: []const []const u8) Error!?ObjectMatchString {
                 try self.validateType(.Object);
 
                 while (true) {
@@ -313,7 +345,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
                     if (key_match) |key| {
                         // Match detected
-                        return ObjectMatch{
+                        return ObjectMatchString{
                             .key = key,
                             .value = (try Element.init(self.ctx)).?,
                         };
@@ -941,6 +973,30 @@ test "object match any" {
         var buffer: [100]u8 = undefined;
         expectEqual(match.value.kind, .Boolean);
         expectEqual(try match.value.boolean(), false);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+}
+
+test "object match union" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"foo": true, "foobar": false, "bar": null}
+    );
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    expectEqual(root.kind, .Object);
+
+    if (try root.objectMatchUnion(enum { foobar, foo })) |match| {
+        expectEqual(match.foo.kind, .Boolean);
+        expectEqual(try match.foo.boolean(), true);
+    } else {
+        std.debug.panic("Expected a value", .{});
+    }
+
+    if (try root.objectMatchUnion(enum { foo, foobar })) |match| {
+        expectEqual(match.foobar.kind, .Boolean);
+        expectEqual(try match.foobar.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
