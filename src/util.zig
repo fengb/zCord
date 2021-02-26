@@ -9,6 +9,7 @@ pub fn streamJson(reader: anytype) StreamJson(@TypeOf(reader)) {
         .parser = std_json.StreamingParser.init(),
 
         .element_number = 0,
+        .parse_failure = null,
 
         ._root = null,
         ._debug_buffer = if (debug_buffer)
@@ -25,6 +26,7 @@ pub fn StreamJson(comptime Reader: type) type {
         parser: std_json.StreamingParser,
 
         element_number: usize,
+        parse_failure: ?ParseFailure,
 
         _root: ?Element,
         _debug_buffer: if (debug_buffer)
@@ -32,13 +34,12 @@ pub fn StreamJson(comptime Reader: type) type {
         else
             void,
 
-        const ElementType = union(enum) {
-            Object: void,
-            Array: void,
-            String: void,
-            Number: struct { first_char: u8 },
-            Boolean: void,
-            Null: void,
+        const ParseFailure = union(enum) {
+            wrong_element: struct { wanted: ElementType, actual: ElementType },
+        };
+
+        const ElementType = enum {
+            Object, Array, String, Number, Boolean, Null
         };
 
         const Error = Reader.Error || std_json.StreamingParser.Error || error{
@@ -50,6 +51,7 @@ pub fn StreamJson(comptime Reader: type) type {
             ctx: *Stream,
             kind: ElementType,
 
+            first_char: u8,
             element_number: usize,
             stack_level: u8,
 
@@ -57,9 +59,11 @@ pub fn StreamJson(comptime Reader: type) type {
                 ctx.assertState(.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
 
                 const start_state = ctx.parser.state;
+
+                var byte: u8 = undefined;
                 const kind: ElementType = blk: {
                     while (true) {
-                        const byte = try ctx.nextByte();
+                        byte = try ctx.nextByte();
 
                         if (try ctx.feed(byte)) |token| {
                             switch (token) {
@@ -73,7 +77,7 @@ pub fn StreamJson(comptime Reader: type) type {
                         if (ctx.parser.state != start_state) {
                             switch (ctx.parser.state) {
                                 .String => break :blk .String,
-                                .Number, .NumberMaybeDotOrExponent, .NumberMaybeDigitOrDotOrExponent => break :blk .{ .Number = .{ .first_char = byte } },
+                                .Number, .NumberMaybeDotOrExponent, .NumberMaybeDigitOrDotOrExponent => break :blk .Number,
                                 .TrueLiteral1, .FalseLiteral1 => break :blk .Boolean,
                                 .NullLiteral1 => break :blk .Null,
                                 else => ctx.assertFailure("Element unrecognized: {}", .{ctx.parser.state}),
@@ -82,13 +86,17 @@ pub fn StreamJson(comptime Reader: type) type {
                     }
                 };
                 ctx.element_number += 1;
-                return Element{ .ctx = ctx, .kind = kind, .element_number = ctx.element_number, .stack_level = ctx.parser.stack_used };
+                return Element{
+                    .ctx = ctx,
+                    .kind = kind,
+                    .first_char = byte,
+                    .element_number = ctx.element_number,
+                    .stack_level = ctx.parser.stack_used,
+                };
             }
 
             pub fn boolean(self: Element) Error!bool {
-                if (self.kind != .Boolean) {
-                    return error.WrongElementType;
-                }
+                try self.validateType(.Boolean);
                 self.ctx.assertState(.{ .TrueLiteral1, .FalseLiteral1 });
 
                 switch ((try self.finalizeToken()).?) {
@@ -115,9 +123,7 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             pub fn number(self: Element, comptime T: type) !T {
-                if (self.kind != .Number) {
-                    return error.WrongElementType;
-                }
+                try self.validateType(.Number);
 
                 switch (@typeInfo(T)) {
                     .Int => {
@@ -141,7 +147,7 @@ pub fn StreamJson(comptime Reader: type) type {
 
             fn numberBuffer(self: Element, buffer: []u8) (Error || error{Overflow})![]u8 {
                 // Handle first byte manually
-                buffer[0] = self.kind.Number.first_char;
+                buffer[0] = self.first_char;
 
                 for (buffer[1..]) |*c, i| {
                     const byte = try self.ctx.nextByte();
@@ -233,9 +239,7 @@ pub fn StreamJson(comptime Reader: type) type {
             );
 
             pub fn stringReader(self: Element) Error!StringReader {
-                if (self.kind != .String) {
-                    return error.WrongElementType;
-                }
+                try self.validateType(.String);
 
                 return StringReader{ .context = self };
             }
@@ -249,9 +253,7 @@ pub fn StreamJson(comptime Reader: type) type {
             }
 
             pub fn arrayNext(self: Element) Error!?Element {
-                if (self.kind != .Array) {
-                    return error.WrongElementType;
-                }
+                try self.validateType(.Array);
 
                 if (self.ctx.parser.state == .TopLevelEnd) {
                     return null;
@@ -273,14 +275,12 @@ pub fn StreamJson(comptime Reader: type) type {
                 value: Element,
             };
 
-            pub fn objectMatch(self: Element, key: []const u8) !?ObjectMatch {
+            pub fn objectMatch(self: Element, key: []const u8) Error!?ObjectMatch {
                 return self.objectMatchAny(&[_][]const u8{key});
             }
 
-            pub fn objectMatchAny(self: Element, keys: []const []const u8) !?ObjectMatch {
-                if (self.kind != .Object) {
-                    return error.WrongElementType;
-                }
+            pub fn objectMatchAny(self: Element, keys: []const []const u8) Error!?ObjectMatch {
+                try self.validateType(.Object);
 
                 while (true) {
                     if (self.ctx.parser.state == .TopLevelEnd) {
@@ -375,6 +375,15 @@ pub fn StreamJson(comptime Reader: type) type {
                 return true;
             }
 
+            fn validateType(self: Element, wanted: ElementType) error{WrongElementType}!void {
+                if (self.kind != wanted) {
+                    self.ctx.parse_failure = ParseFailure{
+                        .wrong_element = .{ .wanted = wanted, .actual = self.kind },
+                    };
+                    return error.WrongElementType;
+                }
+            }
+
             /// Dump the rest of this element into a writer.
             /// Warning: this consumes the stream contents.
             pub fn debugDump(self: Element, writer: anytype) !void {
@@ -465,17 +474,13 @@ pub fn StreamJson(comptime Reader: type) type {
 
         fn assert(ctx: Stream, cond: bool) void {
             if (!cond) {
-                if (debug_buffer) {
-                    ctx.debugDump(std.io.getStdErr().writer()) catch {};
-                }
+                ctx.debugDump(std.io.getStdErr().writer()) catch {};
                 unreachable;
             }
         }
 
         fn assertFailure(ctx: Stream, comptime fmt: []const u8, args: anytype) void {
-            if (debug_buffer) {
-                ctx.debugDump(std.io.getStdErr().writer()) catch {};
-            }
+            ctx.debugDump(std.io.getStdErr().writer()) catch {};
             if (std.debug.runtime_safety) {
                 var buffer: [0x1000]u8 = undefined;
                 @panic(std.fmt.bufPrint(&buffer, fmt, args) catch &buffer);
@@ -483,13 +488,20 @@ pub fn StreamJson(comptime Reader: type) type {
         }
 
         pub fn debugDump(ctx: Stream, writer: anytype) !void {
-            var tmp = ctx._debug_buffer;
-            const reader = tmp.reader();
+            if (debug_buffer) {
+                var tmp = ctx._debug_buffer;
+                const reader = tmp.reader();
 
-            var buf: [0x100]u8 = undefined;
-            const size = try reader.read(&buf);
-            try writer.writeAll(buf[0..size]);
-            try writer.writeByte('\n');
+                var buf: [0x100]u8 = undefined;
+                const size = try reader.read(&buf);
+                try writer.writeAll(buf[0..size]);
+                try writer.writeByte('\n');
+            }
+            if (ctx.parse_failure) |parse_failure| switch (parse_failure) {
+                .wrong_element => |wrong_element| {
+                    try writer.print("WrongElementType - wanted: {s}\n", .{@tagName(wrong_element.wanted)});
+                },
+            };
         }
 
         fn nextByte(ctx: *Stream) Error!u8 {
@@ -512,9 +524,7 @@ pub fn StreamJson(comptime Reader: type) type {
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
             ctx.parser.feed(byte, &token1, &token2) catch |err| {
-                if (debug_buffer) {
-                    ctx.debugDump(std.io.getStdErr().writer()) catch {};
-                }
+                ctx.debugDump(std.io.getStdErr().writer()) catch {};
                 return err;
             };
             return token1;
