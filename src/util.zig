@@ -255,7 +255,9 @@ pub fn StreamJson(comptime Reader: type) type {
             pub fn arrayNext(self: Element) Error!?Element {
                 try self.validateType(.Array);
 
-                if (self.ctx.parser.state == .TopLevelEnd) {
+                // This array has been closed out.
+                // TODO: evaluate to see if this is actually robust
+                if (self.ctx.parser.stack_used < self.stack_level) {
                     return null;
                 }
 
@@ -283,11 +285,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 try self.validateType(.Object);
 
                 while (true) {
-                    if (self.ctx.parser.state == .TopLevelEnd) {
-                        return null;
-                    }
-
-                    // This object has been closed out. *Probably* due to number parsing
+                    // This object has been closed out.
                     // TODO: evaluate to see if this is actually robust
                     if (self.ctx.parser.stack_used < self.stack_level) {
                         return null;
@@ -829,16 +827,29 @@ test "array of strings" {
     expectEqual(try root.arrayNext(), null);
 }
 
-test "objects ending in number" {
+test "array early finalize" {
     var fbs = std.io.fixedBufferStream(
-        \\[{"id":0 },{"id": 1}, {"id": 2}]
+        \\[1, 2, 3]
     );
     var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
-    const obj = (try root.arrayNext()).?;
-    if (try obj.objectMatch("banana")) |_| {
-        std.debug.panic("How did this match?", .{});
+    while (try root.arrayNext()) |_| {
+        _ = try root.finalizeToken();
+    }
+}
+
+test "objects ending in number" {
+    var fbs = std.io.fixedBufferStream(
+        \\[{"id":0},{"id": 1}, {"id": 2}]
+    );
+    var stream = streamJson(fbs.reader());
+
+    const root = try stream.root();
+    while (try root.arrayNext()) |obj| {
+        if (try obj.objectMatch("banana")) |_| {
+            std.debug.panic("How did this match?", .{});
+        }
     }
 }
 
