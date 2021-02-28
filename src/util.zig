@@ -12,6 +12,7 @@ pub fn streamJson(reader: anytype) StreamJson(@TypeOf(reader)) {
         .parse_failure = null,
 
         ._root = null,
+        ._debug_cursor = null,
         ._debug_buffer = if (debug_buffer)
             std.fifo.LinearFifo(u8, .{ .Static = 0x100 }).init()
         else {},
@@ -29,6 +30,7 @@ pub fn StreamJson(comptime Reader: type) type {
         parse_failure: ?ParseFailure,
 
         _root: ?Element,
+        _debug_cursor: ?usize,
         _debug_buffer: if (debug_buffer)
             std.fifo.LinearFifo(u8, .{ .Static = 0x100 })
         else
@@ -401,7 +403,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return self.finalizeTokenWithCustomFeeder(self.ctx);
             }
 
-            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?std_json.Token {
+            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) Error!?std_json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
                         self.ctx.assert(self.element_number == self.ctx.element_number);
@@ -461,7 +463,7 @@ pub fn StreamJson(comptime Reader: type) type {
             return self._root.?;
         }
 
-        fn assertState(ctx: Stream, valids: anytype) void {
+        fn assertState(ctx: *Stream, valids: anytype) void {
             inline for (valids) |valid| {
                 if (ctx.parser.state == valid) {
                     return;
@@ -470,14 +472,14 @@ pub fn StreamJson(comptime Reader: type) type {
             ctx.assertFailure("Unexpected state: {s}", .{ctx.parser.state});
         }
 
-        fn assert(ctx: Stream, cond: bool) void {
+        fn assert(ctx: *Stream, cond: bool) void {
             if (!cond) {
                 ctx.debugDump(std.io.getStdErr().writer()) catch {};
                 unreachable;
             }
         }
 
-        fn assertFailure(ctx: Stream, comptime fmt: []const u8, args: anytype) void {
+        fn assertFailure(ctx: *Stream, comptime fmt: []const u8, args: anytype) void {
             ctx.debugDump(std.io.getStdErr().writer()) catch {};
             if (std.debug.runtime_safety) {
                 var buffer: [0x1000]u8 = undefined;
@@ -485,8 +487,25 @@ pub fn StreamJson(comptime Reader: type) type {
             }
         }
 
-        pub fn debugDump(ctx: Stream, writer: anytype) !void {
+        pub fn debugDump(ctx: *Stream, writer: anytype) !void {
             if (debug_buffer) {
+                if (ctx._debug_cursor == null) {
+                    ctx._debug_cursor = 0;
+
+                    var i: usize = 0;
+                    while (ctx.nextByte()) |byte| {
+                        i += 1;
+                        if (i > 10) break;
+                        switch (byte) {
+                            '"', ',', ' ', '\t', '\n' => {
+                                ctx._debug_buffer.count -= 1;
+                                break;
+                            },
+                            else => {},
+                        }
+                    } else |err| {}
+                }
+
                 var tmp = ctx._debug_buffer;
                 const reader = tmp.reader();
 
@@ -503,15 +522,11 @@ pub fn StreamJson(comptime Reader: type) type {
         }
 
         fn nextByte(ctx: *Stream) Error!u8 {
-            return ctx.reader.readByte() catch |err| switch (err) {
-                error.EndOfStream => error.UnexpectedEndOfJson,
-                else => |e| e,
+            const byte = ctx.reader.readByte() catch |err| switch (err) {
+                error.EndOfStream => return error.UnexpectedEndOfJson,
+                else => |e| return e,
             };
-        }
 
-        // A simpler feed() to enable one liners.
-        // token2 can only be close object/array and we don't need it
-        fn feed(ctx: *Stream, byte: u8) !?std_json.Token {
             if (debug_buffer) {
                 if (ctx._debug_buffer.writableLength() == 0) {
                     ctx._debug_buffer.discard(1);
@@ -519,6 +534,13 @@ pub fn StreamJson(comptime Reader: type) type {
                 }
                 ctx._debug_buffer.writeAssumeCapacity(&[_]u8{byte});
             }
+
+            return byte;
+        }
+
+        // A simpler feed() to enable one liners.
+        // token2 can only be close object/array and we don't need it
+        fn feed(ctx: *Stream, byte: u8) !?std_json.Token {
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
             ctx.parser.feed(byte, &token1, &token2) catch |err| {
@@ -926,7 +948,6 @@ test "object match not found" {
     var stream = streamJson(fbs.reader());
 
     const root = try stream.root();
-    try root.debugDump(std.io.getStdErr().writer());
     expectEqual(root.kind, .Object);
 
     expectEqual(try root.objectMatch("???"), null);
