@@ -1158,6 +1158,11 @@ const DiscordWs = struct {
 
         var fba = std.io.fixedBufferStream(event.chunk.data);
         var stream = util.streamJson(fba.reader());
+
+        errdefer |err| {
+            std.debug.print("{}\n", .{stream.debugInfo()});
+        }
+
         const root = try stream.root();
 
         while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {

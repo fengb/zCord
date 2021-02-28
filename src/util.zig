@@ -474,51 +474,59 @@ pub fn StreamJson(comptime Reader: type) type {
 
         fn assert(ctx: *Stream, cond: bool) void {
             if (!cond) {
-                ctx.debugDump(std.io.getStdErr().writer()) catch {};
+                std.debug.print("{}", ctx.debugInfo());
                 unreachable;
             }
         }
 
         fn assertFailure(ctx: *Stream, comptime fmt: []const u8, args: anytype) void {
-            ctx.debugDump(std.io.getStdErr().writer()) catch {};
+            std.debug.print("{}", .{ctx.debugInfo()});
             if (std.debug.runtime_safety) {
                 var buffer: [0x1000]u8 = undefined;
                 @panic(std.fmt.bufPrint(&buffer, fmt, args) catch &buffer);
             }
         }
 
-        pub fn debugDump(ctx: *Stream, writer: anytype) !void {
-            if (debug_buffer) {
-                if (ctx._debug_cursor == null) {
-                    ctx._debug_cursor = 0;
+        const DebugInfo = struct {
+            ctx: *Stream,
 
-                    var i: usize = 0;
-                    while (ctx.nextByte()) |byte| {
-                        i += 1;
-                        if (i > 10) break;
-                        switch (byte) {
-                            '"', ',', ' ', '\t', '\n' => {
-                                ctx._debug_buffer.count -= 1;
-                                break;
-                            },
-                            else => {},
-                        }
-                    } else |err| {}
+            pub fn format(self: DebugInfo, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                if (debug_buffer) {
+                    if (self.ctx._debug_cursor == null) {
+                        self.ctx._debug_cursor = 0;
+
+                        var i: usize = 0;
+                        while (self.ctx.nextByte()) |byte| {
+                            i += 1;
+                            if (i > 10) break;
+                            switch (byte) {
+                                '"', ',', ' ', '\t', '\n' => {
+                                    self.ctx._debug_buffer.count -= 1;
+                                    break;
+                                },
+                                else => {},
+                            }
+                        } else |err| {}
+                    }
+
+                    var copy = self.ctx._debug_buffer;
+                    const reader = copy.reader();
+
+                    var buf: [0x100]u8 = undefined;
+                    const size = try reader.read(&buf);
+                    try writer.writeAll(buf[0..size]);
+                    try writer.writeByte('\n');
                 }
-
-                var tmp = ctx._debug_buffer;
-                const reader = tmp.reader();
-
-                var buf: [0x100]u8 = undefined;
-                const size = try reader.read(&buf);
-                try writer.writeAll(buf[0..size]);
-                try writer.writeByte('\n');
+                if (self.ctx.parse_failure) |parse_failure| switch (parse_failure) {
+                    .wrong_element => |wrong_element| {
+                        try writer.print("WrongElementType - wanted: {s}", .{@tagName(wrong_element.wanted)});
+                    },
+                };
             }
-            if (ctx.parse_failure) |parse_failure| switch (parse_failure) {
-                .wrong_element => |wrong_element| {
-                    try writer.print("WrongElementType - wanted: {s}\n", .{@tagName(wrong_element.wanted)});
-                },
-            };
+        };
+
+        pub fn debugInfo(ctx: *Stream) DebugInfo {
+            return .{ .ctx = ctx };
         }
 
         fn nextByte(ctx: *Stream) Error!u8 {
@@ -543,10 +551,7 @@ pub fn StreamJson(comptime Reader: type) type {
         fn feed(ctx: *Stream, byte: u8) !?std_json.Token {
             var token1: ?std_json.Token = undefined;
             var token2: ?std_json.Token = undefined;
-            ctx.parser.feed(byte, &token1, &token2) catch |err| {
-                ctx.debugDump(std.io.getStdErr().writer()) catch {};
-                return err;
-            };
+            try ctx.parser.feed(byte, &token1, &token2);
             return token1;
         }
     };
