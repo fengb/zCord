@@ -403,7 +403,7 @@ pub fn StreamJson(comptime Reader: type) type {
                 return self.finalizeTokenWithCustomFeeder(self.ctx);
             }
 
-            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) Error!?std_json.Token {
+            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?std_json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
                         self.ctx.assert(self.element_number == self.ctx.element_number);

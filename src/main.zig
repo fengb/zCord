@@ -821,25 +821,21 @@ const DiscordWs = struct {
     auth_token: []const u8,
     intents: Intents,
     presence: Presence,
+    connect_info: ?ConnectInfo,
 
     ssl_tunnel: ?*request.SslTunnel,
     client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
     client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
-    heartbeat_seq: ?usize,
     heartbeat_ack: bool,
-    heartbeat_mailbox: util.Mailbox(HeartbeatMessage),
+    heartbeat_mailbox: util.Mailbox(enum { start, stop, terminate }),
     heartbeat_thread: *std.Thread,
-
-    const HeartbeatMessage = union(enum) {
-        start: ConnectInfo,
-        stop: void,
-        terminate: void,
-    };
 
     const ConnectInfo = struct {
         heartbeat_interval_ms: u64,
+        seq: usize,
+        session_id: Buffer(0x100),
     };
 
     const Opcode = enum {
@@ -941,11 +937,11 @@ const DiscordWs = struct {
         result.auth_token = args.auth_token;
         result.intents = args.intents;
         result.presence = args.presence;
+        result.connect_info = null;
 
         result.ssl_tunnel = null;
         result.write_mutex = .{};
 
-        result.heartbeat_seq = null;
         result.heartbeat_ack = true;
         result.heartbeat_mailbox = .{};
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
@@ -989,7 +985,11 @@ const DiscordWs = struct {
             std.debug.assert(event == .header);
         }
 
-        var result = ConnectInfo{ .heartbeat_interval_ms = 0 };
+        var result = ConnectInfo{
+            .heartbeat_interval_ms = 0,
+            .seq = 0,
+            .session_id = .{},
+        };
         if (try self.client.next()) |event| {
             std.debug.assert(event == .chunk);
 
@@ -1020,6 +1020,17 @@ const DiscordWs = struct {
             return error.MalformedHelloResponse;
         }
 
+        if (self.connect_info) |old_info| {
+            try self.sendCommand(.@"resume", .{
+                .token = self.auth_token,
+                .seq = old_info.seq,
+                .session_id = old_info.session_id.slice(),
+            });
+            result.session_id = old_info.session_id;
+            result.seq = old_info.seq;
+            return result;
+        }
+
         try self.sendCommand(.identify, .{
             .compress = false,
             .intents = self.intents.toRaw(),
@@ -1031,6 +1042,47 @@ const DiscordWs = struct {
             },
             .presence = self.presence,
         });
+
+        if (try self.client.next()) |event| {
+            std.debug.assert(event == .header);
+        }
+
+        if (try self.client.next()) |event| {
+            var fba = std.io.fixedBufferStream(event.chunk.data);
+            var stream = util.streamJson(fba.reader());
+
+            const root = try stream.root();
+            while (try root.objectMatchAny(&[_][]const u8{ "t", "s", "op", "d" })) |match| {
+                const swh = util.Swhash(2);
+                switch (swh.match(match.key)) {
+                    swh.case("t") => {
+                        var name_buf: [0x100]u8 = undefined;
+                        const name = try match.value.stringBuffer(&name_buf);
+                        if (!std.mem.eql(u8, name, "READY")) {
+                            return error.MalformedIdentify;
+                        }
+                    },
+                    swh.case("s") => {
+                        if (try match.value.optionalNumber(u32)) |seq| {
+                            result.seq = seq;
+                        }
+                    },
+                    swh.case("op") => {
+                        const op = try std.meta.intToEnum(Opcode, try match.value.number(u8));
+                        if (op != .dispatch) {
+                            return error.MalformedIdentify;
+                        }
+                    },
+                    swh.case("d") => {
+                        while (try match.value.objectMatch("session_id")) |session_match| {
+                            const slice = try session_match.value.stringBuffer(&result.session_id.data);
+                            result.session_id.len = slice.len;
+                        }
+                    },
+                    else => unreachable,
+                }
+            }
+        }
 
         return result;
     }
@@ -1045,7 +1097,7 @@ const DiscordWs = struct {
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         var reconnect_wait: u64 = 1;
         while (true) {
-            const info = self.connect() catch |err| {
+            self.connect_info = self.connect() catch |err| {
                 std.debug.print("Connect error: {s}\n", .{@errorName(err)});
                 std.time.sleep(reconnect_wait * std.time.ns_per_s);
                 reconnect_wait = std.math.min(reconnect_wait * 2, 30);
@@ -1055,7 +1107,7 @@ const DiscordWs = struct {
 
             reconnect_wait = 1;
 
-            self.heartbeat_mailbox.putOverwrite(.{ .start = info });
+            self.heartbeat_mailbox.putOverwrite(.start);
             defer self.heartbeat_mailbox.putOverwrite(.stop);
 
             self.listen(ctx, handler) catch |err| switch (err) {
@@ -1173,7 +1225,7 @@ const DiscordWs = struct {
                 },
                 swh.case("s") => {
                     if (try match.value.optionalNumber(u32)) |seq| {
-                        self.heartbeat_seq = seq;
+                        self.connect_info.?.seq = seq;
                     }
                 },
                 swh.case("op") => {
@@ -1182,7 +1234,6 @@ const DiscordWs = struct {
                 swh.case("d") => {
                     switch (op orelse return error.DataBeforeOp) {
                         .dispatch => {
-                            std.debug.print("<< {d} -- {s}\n", .{ self.heartbeat_seq, name });
                             try handler.handleDispatch(
                                 ctx,
                                 name orelse return error.DispatchWithoutName,
@@ -1222,14 +1273,12 @@ const DiscordWs = struct {
         try ssl_tunnel.conn.flush();
     }
 
-    pub extern "c" fn shutdown(sockfd: std.os.fd_t, how: c_int) c_int;
-
     fn heartbeatHandler(self: *DiscordWs) void {
         var heartbeat_interval_ms: u64 = 0;
         while (true) {
             if (heartbeat_interval_ms == 0) {
                 switch (self.heartbeat_mailbox.get()) {
-                    .start => |info| heartbeat_interval_ms = info.heartbeat_interval_ms,
+                    .start => heartbeat_interval_ms = self.connect_info.?.heartbeat_interval_ms,
                     .stop => {},
                     .terminate => return,
                 }
@@ -1247,7 +1296,7 @@ const DiscordWs = struct {
 
                 if (self.heartbeat_ack) {
                     self.heartbeat_ack = false;
-                    if (self.sendCommand(.heartbeat, self.heartbeat_seq)) |_| {
+                    if (self.sendCommand(.heartbeat, self.connect_info.?.seq)) |_| {
                         std.debug.print(">> ♡\n", .{});
                         continue;
                     } else |_| {
@@ -1256,11 +1305,10 @@ const DiscordWs = struct {
                 } else {
                     std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
                 }
-                const SHUT_RDWR = 2;
-                const rc = shutdown(self.ssl_tunnel.?.tcp_conn.handle, SHUT_RDWR);
-                if (rc != 0) {
-                    std.debug.print("Shutdown failed: {d}\n", .{std.c.getErrno(rc)});
-                }
+
+                std.os.shutdown(self.ssl_tunnel.?.tcp_conn.handle, .both) catch |err| {
+                    std.debug.print("Shutdown failed: {}\n", .{err});
+                };
                 heartbeat_interval_ms = 0;
             }
         }
