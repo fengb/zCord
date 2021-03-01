@@ -816,8 +816,7 @@ const DiscordWs = struct {
     client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
-    heartbeat_ack: bool,
-    heartbeat_mailbox: util.Mailbox(enum { start, stop, terminate }),
+    heartbeat_mailbox: util.Mailbox(enum { start, ack, stop, terminate }),
     heartbeat_thread: *std.Thread,
 
     const ConnectInfo = struct {
@@ -930,7 +929,6 @@ const DiscordWs = struct {
         result.ssl_tunnel = null;
         result.write_mutex = .{};
 
-        result.heartbeat_ack = true;
         result.heartbeat_mailbox = .{};
         result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
 
@@ -1219,10 +1217,7 @@ const DiscordWs = struct {
                             el_data,
                         );
                     },
-                    .heartbeat_ack => {
-                        std.debug.print("<< ♥\n", .{});
-                        self.heartbeat_ack = true;
-                    },
+                    .heartbeat_ack => self.heartbeat_mailbox.putOverwrite(.ack),
                     else => {},
                 }
                 _ = try el_data.finalizeToken();
@@ -1252,11 +1247,15 @@ const DiscordWs = struct {
 
     fn heartbeatHandler(self: *DiscordWs) void {
         var heartbeat_interval_ms: u64 = 0;
+        var ack = false;
         while (true) {
             if (heartbeat_interval_ms == 0) {
                 switch (self.heartbeat_mailbox.get()) {
-                    .start => heartbeat_interval_ms = self.connect_info.?.heartbeat_interval_ms,
-                    .stop => {},
+                    .start => {
+                        heartbeat_interval_ms = self.connect_info.?.heartbeat_interval_ms;
+                        ack = true;
+                    },
+                    .ack, .stop => {},
                     .terminate => return,
                 }
             } else {
@@ -1265,14 +1264,18 @@ const DiscordWs = struct {
                 if (self.heartbeat_mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
                         .start => {},
+                        .ack => {
+                            std.debug.print("<< ♥\n", .{});
+                            ack = true;
+                        },
                         .stop => heartbeat_interval_ms = 0,
                         .terminate => return,
                     }
                     continue;
                 }
 
-                if (self.heartbeat_ack) {
-                    self.heartbeat_ack = false;
+                if (ack) {
+                    ack = false;
                     if (self.sendCommand(.heartbeat, self.connect_info.?.seq)) |_| {
                         std.debug.print(">> ♡\n", .{});
                         continue;
