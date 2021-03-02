@@ -5,10 +5,6 @@
 [submodule "lib/wz"]
 	path = lib/wz
 	url = https://github.com/truemedian/wz
-[submodule "lib/analysis-buddy"]
-	path = lib/analysis-buddy
-	url = https://github.com/alexnask/analysis-buddy
-	branch = master
 [submodule "lib/hzzp"]
 	path = lib/hzzp
 	url = https://github.com/truemedian/hzzp

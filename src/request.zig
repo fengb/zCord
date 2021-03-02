@@ -2,7 +2,7 @@ const std = @import("std");
 const hzzp = @import("hzzp");
 const ssl = @import("zig-bearssl");
 
-const bot_agent = "zigbot9001/0.0.1";
+const bot_agent = "zCord/0.0.1";
 
 pub const SslTunnel = struct {
     allocator: *std.mem.Allocator,

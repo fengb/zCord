@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zigbot9001", "src/main.zig");
+    const exe = b.addExecutable("zCord", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
@@ -30,10 +30,6 @@ pub fn build(b: *std.build.Builder) void {
         .name = "wz",
         .path = "lib/wz/src/main.zig",
         .dependencies = &[_]std.build.Pkg{hzzp},
-    });
-    exe.addPackage(.{
-        .name = "analysis-buddy",
-        .path = "lib/analysis-buddy/src/main.zig",
     });
     exe.addPackage(.{
         .name = "zig-bearssl",
