@@ -4,6 +4,7 @@ const wz = @import("wz");
 const ssl = @import("zig-bearssl");
 const analBuddy = @import("analysis-buddy");
 
+const Heartbeat = @import("Heartbeat.zig");
 const format = @import("format.zig");
 const request = @import("request.zig");
 const util = @import("util.zig");
@@ -803,7 +804,7 @@ pub fn main() !void {
     std.debug.print("Exited: {}\n", .{discord_ws.client});
 }
 
-const DiscordWs = struct {
+pub const DiscordWs = struct {
     allocator: *std.mem.Allocator,
 
     auth_token: []const u8,
@@ -816,8 +817,7 @@ const DiscordWs = struct {
     client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
-    heartbeat_mailbox: util.Mailbox(enum { start, ack, stop, terminate }),
-    heartbeat_thread: *std.Thread,
+    heartbeat: Heartbeat,
 
     const ConnectInfo = struct {
         heartbeat_interval_ms: u64,
@@ -929,8 +929,8 @@ const DiscordWs = struct {
         result.ssl_tunnel = null;
         result.write_mutex = .{};
 
-        result.heartbeat_mailbox = .{};
-        result.heartbeat_thread = try std.Thread.spawn(result, heartbeatHandler);
+        result.heartbeat = try Heartbeat.init(result);
+        errdefer result.heartbeat.deinit();
 
         return result;
     }
@@ -939,9 +939,7 @@ const DiscordWs = struct {
         if (self.ssl_tunnel) |ssl_tunnel| {
             ssl_tunnel.deinit();
         }
-        self.heartbeat_mailbox.putOverwrite(.terminate);
-        // Reap the thread
-        self.heartbeat_thread.wait();
+        self.heartbeat.deinit();
         self.allocator.destroy(self);
     }
 
@@ -1085,8 +1083,8 @@ const DiscordWs = struct {
 
             reconnect_wait = 1;
 
-            self.heartbeat_mailbox.putOverwrite(.start);
-            defer self.heartbeat_mailbox.putOverwrite(.stop);
+            self.heartbeat.mailbox.putOverwrite(.start);
+            defer self.heartbeat.mailbox.putOverwrite(.stop);
 
             self.listen(ctx, handler) catch |err| switch (err) {
                 // TODO: handle reconnect better
@@ -1217,7 +1215,7 @@ const DiscordWs = struct {
                             el_data,
                         );
                     },
-                    .heartbeat_ack => self.heartbeat_mailbox.putOverwrite(.ack),
+                    .heartbeat_ack => self.heartbeat.mailbox.putOverwrite(.ack),
                     else => {},
                 }
                 _ = try el_data.finalizeToken();
@@ -1243,55 +1241,6 @@ const DiscordWs = struct {
         try self.client.writeChunk(msg);
 
         try ssl_tunnel.conn.flush();
-    }
-
-    fn heartbeatHandler(self: *DiscordWs) void {
-        var heartbeat_interval_ms: u64 = 0;
-        var ack = false;
-        while (true) {
-            if (heartbeat_interval_ms == 0) {
-                switch (self.heartbeat_mailbox.get()) {
-                    .start => {
-                        heartbeat_interval_ms = self.connect_info.?.heartbeat_interval_ms;
-                        ack = true;
-                    },
-                    .ack, .stop => {},
-                    .terminate => return,
-                }
-            } else {
-                // Force fire the heartbeat earlier
-                const timeout_ms = heartbeat_interval_ms - 1000;
-                if (self.heartbeat_mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
-                    switch (msg) {
-                        .start => {},
-                        .ack => {
-                            std.debug.print("<< ♥\n", .{});
-                            ack = true;
-                        },
-                        .stop => heartbeat_interval_ms = 0,
-                        .terminate => return,
-                    }
-                    continue;
-                }
-
-                if (ack) {
-                    ack = false;
-                    if (self.sendCommand(.heartbeat, self.connect_info.?.seq)) |_| {
-                        std.debug.print(">> ♡\n", .{});
-                        continue;
-                    } else |_| {
-                        std.debug.print("Heartbeat send failed. Reconnecting...\n", .{});
-                    }
-                } else {
-                    std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
-                }
-
-                std.os.shutdown(self.ssl_tunnel.?.tcp_conn.handle, .both) catch |err| {
-                    std.debug.print("Shutdown failed: {}\n", .{err});
-                };
-                heartbeat_interval_ms = 0;
-            }
-        }
     }
 };
 
