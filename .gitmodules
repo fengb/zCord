@@ -1,9 +1,9 @@
-[submodule "lib/zig-bearssl"]
-	path = lib/zig-bearssl
-	url = https://github.com/MasterQ32/zig-bearssl
 [submodule "lib/wz"]
 	path = lib/wz
 	url = https://github.com/truemedian/wz
 [submodule "lib/hzzp"]
 	path = lib/hzzp
 	url = https://github.com/truemedian/hzzp
+[submodule "lib/iguanaTLS"]
+	path = lib/iguanaTLS
+	url = https://github.com/alexnask/iguanaTLS

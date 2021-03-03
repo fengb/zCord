@@ -32,11 +32,10 @@ pub fn build(b: *std.build.Builder) void {
         .dependencies = &[_]std.build.Pkg{hzzp},
     });
     exe.addPackage(.{
-        .name = "zig-bearssl",
-        .path = "lib/zig-bearssl/src/lib.zig",
+        .name = "iguanaTLS",
+        .path = "lib/iguanaTLS/src/main.zig",
     });
 
-    @import("lib/zig-bearssl/src/lib.zig").linkBearSSL("./lib/zig-bearssl", exe, target);
     exe.install();
 
     const run_cmd = exe.run();
