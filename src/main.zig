@@ -266,11 +266,13 @@ pub const DiscordWs = struct {
             .seq = 0,
             .session_id = .{},
         };
-        if (try self.client.next()) |event| {
-            std.debug.assert(event == .chunk);
 
-            var fba = std.io.fixedBufferStream(event.chunk.data);
-            var stream = util.streamJson(fba.reader());
+        var flush_error: util.ErrorOf(self.client.flushReader)!void = {};
+        {
+            var stream = util.streamJson(self.client.reader());
+            defer self.client.flushReader() catch |err| {
+                flush_error = err;
+            };
             errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
             const root = try stream.root();
@@ -288,6 +290,7 @@ pub const DiscordWs = struct {
                 },
             };
         }
+        try flush_error;
 
         if (result.heartbeat_interval_ms == 0) {
             return error.MalformedHelloResponse;
@@ -320,9 +323,11 @@ pub const DiscordWs = struct {
             std.debug.assert(event == .header);
         }
 
-        if (try self.client.next()) |event| {
-            var fba = std.io.fixedBufferStream(event.chunk.data);
-            var stream = util.streamJson(fba.reader());
+        {
+            var stream = util.streamJson(self.client.reader());
+            defer self.client.flushReader() catch |err| {
+                flush_error = err;
+            };
             errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
             const root = try stream.root();
@@ -353,6 +358,7 @@ pub const DiscordWs = struct {
                 },
             };
         }
+        try flush_error;
 
         return result;
     }
@@ -392,14 +398,12 @@ pub const DiscordWs = struct {
 
     pub fn listen(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         while (try self.client.next()) |event| {
-            // Skip over any remaining chunks. The processor didn't take care of it.
-            if (event != .header) continue;
-
             switch (event.header.opcode) {
                 .Text => {
-                    self.processChunks(ctx, handler) catch |err| {
+                    self.processChunks(self.client.reader(), ctx, handler) catch |err| {
                         std.debug.print("Process chunks failed: {s}\n", .{err});
                     };
+                    try self.client.flushReader();
                 },
                 .Ping, .Pong => {},
                 .Close => {
@@ -471,20 +475,13 @@ pub const DiscordWs = struct {
         return error.ConnectionReset;
     }
 
-    pub fn processChunks(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        const event = (try self.client.next()) orelse return error.NoBody;
-        std.debug.assert(event == .chunk);
+    pub fn processChunks(self: *DiscordWs, reader: anytype, ctx: anytype, handler: anytype) !void {
+        var stream = util.streamJson(reader);
+        errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
         var name_buf: [32]u8 = undefined;
         var name: ?[]u8 = null;
         var op: ?Opcode = null;
-
-        var fba = std.io.fixedBufferStream(event.chunk.data);
-        var stream = util.streamJson(fba.reader());
-
-        errdefer |err| {
-            std.debug.print("{}\n", .{stream.debugInfo()});
-        }
 
         const root = try stream.root();
 
