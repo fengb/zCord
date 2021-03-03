@@ -1,23 +1,16 @@
 const std = @import("std");
 const hzzp = @import("hzzp");
-const ssl = @import("zig-bearssl");
+const iguanaTLS = @import("iguanaTLS");
 
 const bot_agent = "zigbot9001/0.0.1";
 
 pub const SslTunnel = struct {
     allocator: *std.mem.Allocator,
 
-    trust_anchor: ssl.TrustAnchorCollection,
-    x509: ssl.x509.Minimal,
-    client: ssl.Client,
-
+    client: Client,
     tcp_conn: std.net.Stream,
-    tcp_reader: std.net.Stream.Reader,
-    tcp_writer: std.net.Stream.Writer,
 
-    conn: Stream,
-
-    pub const Stream = ssl.Stream(*std.net.Stream.Reader, *std.net.Stream.Writer);
+    pub const Client = iguanaTLS.Client(std.net.Stream.Reader, std.net.Stream.Writer, iguanaTLS.ciphersuites.all, false);
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
@@ -30,30 +23,29 @@ pub const SslTunnel = struct {
 
         result.allocator = args.allocator;
 
-        result.trust_anchor = ssl.TrustAnchorCollection.init(args.allocator);
-        errdefer result.trust_anchor.deinit();
-        try result.trust_anchor.appendFromPEM(args.pem);
-
-        result.x509 = ssl.x509.Minimal.init(result.trust_anchor);
-        result.client = ssl.Client.init(result.x509.getEngine());
-        result.client.relocate();
-        try result.client.reset(args.host, false);
+        var fbs = std.io.fixedBufferStream(args.pem);
+        const trusted_chain = try iguanaTLS.x509.TrustAnchorChain.from_pem(args.allocator, fbs.reader());
+        defer trusted_chain.deinit();
 
         result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
         errdefer result.tcp_conn.close();
 
-        result.tcp_reader = result.tcp_conn.reader();
-        result.tcp_writer = result.tcp_conn.writer();
-
-        result.conn = ssl.initStream(result.client.getEngine(), &result.tcp_reader, &result.tcp_writer);
+        result.client = try iguanaTLS.client_connect(.{
+            .reader = result.tcp_conn.reader(),
+            .writer = result.tcp_conn.writer(),
+            //.cert_verifier = .default,
+            //.trusted_certificates = trusted_chain.data.items,
+            .cert_verifier = .none,
+            .temp_allocator = args.allocator,
+        }, args.host);
+        errdefer client.close_notify() catch {};
 
         return result;
     }
 
     pub fn deinit(self: *SslTunnel) void {
+        self.client.close_notify() catch {};
         self.tcp_conn.close();
-        self.trust_anchor.deinit();
-
         self.allocator.destroy(self);
     }
 };

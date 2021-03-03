@@ -1,7 +1,6 @@
 const std = @import("std");
 const hzzp = @import("hzzp");
 const wz = @import("wz");
-const ssl = @import("zig-bearssl");
 
 const Heartbeat = @import("Heartbeat.zig");
 const format = @import("format.zig");
@@ -105,7 +104,7 @@ pub const DiscordWs = struct {
     connect_info: ?ConnectInfo,
 
     ssl_tunnel: ?*request.SslTunnel,
-    client: wz.base.client.BaseClient(request.SslTunnel.Stream.DstReader, request.SslTunnel.Stream.DstWriter),
+    client: wz.base.client.BaseClient(request.SslTunnel.Client.Reader, request.SslTunnel.Client.Writer),
     client_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
@@ -242,19 +241,20 @@ pub const DiscordWs = struct {
             .pem = @embedFile("../discord-gg-chain.pem"),
             .host = "gateway.discord.gg",
         });
-        errdefer self.ssl_tunnel.?.deinit();
+        errdefer {
+            self.ssl_tunnel.?.deinit();
+            self.ssl_tunnel = null;
+        }
 
         self.client = wz.base.client.create(
             &self.client_buffer,
-            self.ssl_tunnel.?.conn.reader(),
-            self.ssl_tunnel.?.conn.writer(),
+            self.ssl_tunnel.?.client.reader(),
+            self.ssl_tunnel.?.client.writer(),
         );
 
         // Handshake
         try self.client.handshakeStart("/?v=6&encoding=json");
         try self.client.handshakeAddHeaderValue("Host", "gateway.discord.gg");
-        try self.client.handshake_client.finishHeaders(); // needed due to SSL flushing
-        try self.ssl_tunnel.?.conn.flush();
         try self.client.handshakeFinish();
 
         if (try self.client.next()) |event| {
@@ -271,6 +271,7 @@ pub const DiscordWs = struct {
 
             var fba = std.io.fixedBufferStream(event.chunk.data);
             var stream = util.streamJson(fba.reader());
+            errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
             const root = try stream.root();
             while (try root.objectMatchUnion(enum { op, d })) |match| switch (match) {
@@ -322,6 +323,7 @@ pub const DiscordWs = struct {
         if (try self.client.next()) |event| {
             var fba = std.io.fixedBufferStream(event.chunk.data);
             var stream = util.streamJson(fba.reader());
+            errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
             const root = try stream.root();
             while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
@@ -365,11 +367,14 @@ pub const DiscordWs = struct {
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         var reconnect_wait: u64 = 1;
         while (true) {
-            self.connect_info = self.connect() catch |err| {
-                std.debug.print("Connect error: {s}\n", .{@errorName(err)});
-                std.time.sleep(reconnect_wait * std.time.ns_per_s);
-                reconnect_wait = std.math.min(reconnect_wait * 2, 30);
-                continue;
+            self.connect_info = self.connect() catch |err| switch (err) {
+                // error.CertificateVerificationFailed => |e| return e,
+                else => {
+                    std.debug.print("Connect error: {s}\n", .{@errorName(err)});
+                    std.time.sleep(reconnect_wait * std.time.ns_per_s);
+                    reconnect_wait = std.math.min(reconnect_wait * 2, 30);
+                    continue;
+                },
             };
             defer self.disconnect();
 
@@ -379,9 +384,7 @@ pub const DiscordWs = struct {
             defer self.heartbeat.mailbox.putOverwrite(.stop);
 
             self.listen(ctx, handler) catch |err| switch (err) {
-                // TODO: handle reconnect better
-                // IO comes from BearSSL
-                error.ConnectionReset, error.IO => continue,
+                error.ConnectionReset => continue,
                 else => |e| return e,
             };
         }
@@ -531,8 +534,6 @@ pub const DiscordWs = struct {
 
         try self.client.writeHeader(.{ .opcode = .Text, .length = msg.len });
         try self.client.writeChunk(msg);
-
-        try ssl_tunnel.conn.flush();
     }
 };
 
