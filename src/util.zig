@@ -1160,7 +1160,7 @@ pub fn ErrorOf(comptime func: anytype) type {
     };
 }
 
-pub fn Mailbox(comptime T: type) type {
+pub fn ThreadMailbox(comptime T: type) type {
     return struct {
         const Self = @This();
 
@@ -1206,6 +1206,42 @@ pub fn Mailbox(comptime T: type) type {
         pub fn putOverwrite(self: *Self, value: T) void {
             self.value = value;
             self.cond.impl.signal();
+        }
+    };
+}
+
+pub fn EventLoopMailbox(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        value: ?T = null,
+        listener_tick: ?std.event.Loop.NextTickNode = null,
+
+        pub fn get(self: *Self) T {
+            if (self.value) |value| {
+                self.value = null;
+                return value;
+            } else {
+                std.debug.assert(self.listener_tick == null);
+                suspend {
+                    self.listener_tick = std.event.Loop.NextTickNode{
+                        .prev = undefined,
+                        .next = undefined,
+                        .data = @frame(),
+                    };
+                }
+                self.listener_tick = null;
+
+                defer self.value = null;
+                return self.value.?;
+            }
+        }
+
+        pub fn putOverwrite(self: *Self, value: T) void {
+            self.value = value;
+            if (self.listener_tick) |*listener_tick| {
+                std.event.Loop.instance.?.onNextTick(listener_tick);
+            }
         }
     };
 }

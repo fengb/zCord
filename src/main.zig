@@ -9,7 +9,7 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
-//pub const io_mode = .evented;
+pub const io_mode = .evented;
 
 fn Buffer(comptime max_len: usize) type {
     return struct {

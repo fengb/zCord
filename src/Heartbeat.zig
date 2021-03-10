@@ -51,7 +51,7 @@ pub const CallbackHandler = struct {
 
 const ThreadHandler = struct {
     allocator: *std.mem.Allocator,
-    mailbox: util.Mailbox(Message),
+    mailbox: util.ThreadMailbox(Message),
     thread: *std.Thread,
 
     fn init(allocator: *std.mem.Allocator, discord: *DiscordWs) !*ThreadHandler {
@@ -126,10 +126,12 @@ const EventLoopHandler = struct {
     allocator: *std.mem.Allocator,
     refcount: u32,
     ack: bool,
-    mailbox: util.Mailbox(Message),
-    timer_status: enum { sleep, active, dying },
+    mailbox: util.EventLoopMailbox(Message),
+    timer_status: TimerStatus,
     timer_frame: @Frame(timer),
     control_frame: @Frame(control),
+
+    const TimerStatus = enum { sleep, active, dying };
 
     fn init(allocator: *std.mem.Allocator, discord: *DiscordWs) !*EventLoopHandler {
         const result = try allocator.create(EventLoopHandler);
@@ -141,7 +143,9 @@ const EventLoopHandler = struct {
         return result;
     }
 
-    fn deinit(ctx: *EventLoopHandler) void {}
+    fn deinit(ctx: *EventLoopHandler) void {
+        ctx.mailbox.putOverwrite(.deinit);
+    }
 
     fn retain(ctx: *EventLoopHandler) void {
         ctx.refcount += 1;
@@ -150,9 +154,7 @@ const EventLoopHandler = struct {
     fn release(ctx: *EventLoopHandler) void {
         ctx.refcount -= 1;
         if (ctx.refcount == 0) {
-            suspend {
-                ctx.allocator.destroy(ctx);
-            }
+            suspend ctx.allocator.destroy(ctx);
         }
     }
 
@@ -160,32 +162,31 @@ const EventLoopHandler = struct {
         ctx.retain();
         defer ctx.release();
         while (true) {
-            suspend;
             switch (ctx.mailbox.get()) {
                 .start => {
                     ctx.ack = true;
-
-                    const old_status = ctx.timer_status;
-                    ctx.timer_status = .active;
-                    switch (old_status) {
-                        .sleep => resume ctx.timer_frame,
-                        .active => {},
-                        .dying => unreachable,
-                    }
+                    ctx.updateTimer(.active);
                 },
-                .ack => ctx.ack = true,
+                .ack => {
+                    std.debug.print("<< ♥\n", .{});
+                    ctx.ack = true;
+                },
                 .stop => ctx.timer_status = .sleep,
                 .deinit => {
-                    const old_status = ctx.timer_status;
-                    ctx.timer_status = .active;
-                    switch (old_status) {
-                        .sleep => resume ctx.timer_frame,
-                        .active => {},
-                        .dying => unreachable,
-                    }
+                    ctx.updateTimer(.dying);
                     return;
                 },
             }
+        }
+    }
+
+    fn updateTimer(ctx: *EventLoopHandler, new_status: TimerStatus) void {
+        const old_status = ctx.timer_status;
+        ctx.timer_status = new_status;
+        switch (old_status) {
+            .sleep => resume ctx.timer_frame,
+            .active => {},
+            .dying => unreachable,
         }
     }
 
@@ -195,12 +196,13 @@ const EventLoopHandler = struct {
         while (true) {
             switch (ctx.timer_status) {
                 .sleep => {
-                    suspend {}
+                    suspend;
                 },
                 .active => {
                     const timeout_ms = discord.connect_info.?.heartbeat_interval_ms - 1000;
-                    std.time.sleep(timeout_ms * std.time.ns_per_ms);
+                    std.event.Loop.instance.?.sleep(timeout_ms * std.time.ns_per_ms);
 
+                    // Deactivated during sleep
                     if (ctx.timer_status != .active) continue;
 
                     if (ctx.ack) {
