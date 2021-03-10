@@ -506,13 +506,13 @@ pub fn StreamJson(comptime Reader: type) type {
 
         fn assert(ctx: *Stream, cond: bool) void {
             if (!cond) {
-                std.debug.print("{}", ctx.debugInfo());
+                //std.debug.print("{}", ctx.debugInfo());
                 unreachable;
             }
         }
 
         fn assertFailure(ctx: *Stream, comptime fmt: []const u8, args: anytype) void {
-            std.debug.print("{}", .{ctx.debugInfo()});
+            //std.debug.print("{}", .{ctx.debugInfo()});
             if (std.debug.runtime_safety) {
                 var buffer: [0x1000]u8 = undefined;
                 @panic(std.fmt.bufPrint(&buffer, fmt, args) catch &buffer);

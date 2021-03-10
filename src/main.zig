@@ -9,6 +9,8 @@ const util = @import("util.zig");
 
 const agent = "zigbot9001/0.0.1";
 
+//pub const io_mode = .evented;
+
 fn Buffer(comptime max_len: usize) type {
     return struct {
         data: [max_len]u8 = undefined,
@@ -207,6 +209,7 @@ pub const DiscordWs = struct {
         auth_token: []const u8,
         intents: Intents,
         presence: Presence = .{},
+        heartbeat_strategy: Heartbeat.Strategy = Heartbeat.Strategy.default,
     }) !*DiscordWs {
         const result = try args.allocator.create(DiscordWs);
         errdefer args.allocator.destroy(result);
@@ -220,7 +223,7 @@ pub const DiscordWs = struct {
         result.ssl_tunnel = null;
         result.write_mutex = .{};
 
-        result.heartbeat = try Heartbeat.init(result);
+        result.heartbeat = try Heartbeat.init(args.allocator, result, args.heartbeat_strategy);
         errdefer result.heartbeat.deinit();
 
         return result;
@@ -386,8 +389,8 @@ pub const DiscordWs = struct {
 
             reconnect_wait = 1;
 
-            self.heartbeat.mailbox.putOverwrite(.start);
-            defer self.heartbeat.mailbox.putOverwrite(.stop);
+            self.heartbeat.send(.start);
+            defer self.heartbeat.send(.stop);
 
             self.listen(ctx, handler) catch |err| switch (err) {
                 error.ConnectionReset => continue,
@@ -507,7 +510,7 @@ pub const DiscordWs = struct {
                             el_data,
                         );
                     },
-                    .heartbeat_ack => self.heartbeat.mailbox.putOverwrite(.ack),
+                    .heartbeat_ack => self.heartbeat.send(.ack),
                     else => {},
                 }
                 _ = try el_data.finalizeToken();
