@@ -320,7 +320,9 @@ pub const DiscordWs = struct {
         });
 
         if (try self.client.next()) |event| {
-            std.debug.assert(event == .header);
+            if (event.header.opcode == .Close) {
+                try self.processCloseEvent();
+            }
         }
 
         {
@@ -373,11 +375,14 @@ pub const DiscordWs = struct {
     pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         var reconnect_wait: u64 = 1;
         while (true) {
-            self.connect_info = self.connect() catch |err| {
-                std.debug.print("Connect error: {s}\n", .{@errorName(err)});
-                std.time.sleep(reconnect_wait * std.time.ns_per_s);
-                reconnect_wait = std.math.min(reconnect_wait * 2, 30);
-                continue;
+            self.connect_info = self.connect() catch |err| switch (err) {
+                error.AuthenticationFailed => |e| return e,
+                else => {
+                    std.debug.print("Connect error: {s}\n", .{@errorName(err)});
+                    std.time.sleep(reconnect_wait * std.time.ns_per_s);
+                    reconnect_wait = std.math.min(reconnect_wait * 2, 30);
+                    continue;
+                },
             };
             defer self.disconnect();
 
@@ -395,6 +400,64 @@ pub const DiscordWs = struct {
         }
     }
 
+    fn processCloseEvent(self: *DiscordWs) !void {
+        const event = (try self.client.next()).?;
+
+        const CloseEventCode = enum(u16) {
+            UnknownError = 4000,
+            UnknownOpcode = 4001,
+            DecodeError = 4002,
+            NotAuthenticated = 4003,
+            AuthenticationFailed = 4004,
+            AlreadyAuthenticated = 4005,
+            InvalidSeq = 4007,
+            RateLimited = 4008,
+            SessionTimedOut = 4009,
+            InvalidShard = 4010,
+            ShardingRequired = 4011,
+            InvalidApiVersion = 4012,
+            InvalidIntents = 4013,
+            DisallowedIntents = 4014,
+
+            _,
+
+            pub fn format(code: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                try writer.print("{d}: {s}", .{ @enumToInt(code), @tagName(code) });
+            }
+        };
+
+        const code_num = std.mem.readIntBig(u16, event.chunk.data[0..2]);
+        const code = @intToEnum(CloseEventCode, code_num);
+        switch (code) {
+            _ => {
+                std.debug.print("Websocket close frame - {d}: unknown code. Reconnecting...\n", .{code_num});
+                return error.ConnectionReset;
+            },
+            .UnknownError, .SessionTimedOut => {
+                std.debug.print("Websocket close frame - {}. Reconnecting...\n", .{code});
+                return error.ConnectionReset;
+            },
+
+            // Most likely user error
+            .AuthenticationFailed => return error.AuthenticationFailed,
+            .AlreadyAuthenticated => return error.AlreadyAuthenticated,
+            .DecodeError => return error.DecodeError,
+            .UnknownOpcode => return error.UnknownOpcode,
+            .RateLimited => return error.WoahNelly,
+            .DisallowedIntents => return error.DisallowedIntents,
+
+            // We don't support these yet
+            .InvalidSeq => unreachable,
+            .InvalidShard => unreachable,
+            .ShardingRequired => unreachable,
+            .InvalidApiVersion => unreachable,
+
+            // This library fucked up
+            .NotAuthenticated => unreachable,
+            .InvalidIntents => unreachable,
+        }
+    }
+
     pub fn listen(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
         while (try self.client.next()) |event| {
             switch (event.header.opcode) {
@@ -405,66 +468,7 @@ pub const DiscordWs = struct {
                     try self.client.flushReader();
                 },
                 .Ping, .Pong => {},
-                .Close => {
-                    const body = (try self.client.next()) orelse {
-                        std.debug.print("Websocket close frame - {{}}: no reason provided. Reconnecting...\n", .{});
-                        return error.ConnectionReset;
-                    };
-
-                    const CloseEventCode = enum(u16) {
-                        UnknownError = 4000,
-                        UnknownOpcode = 4001,
-                        DecodeError = 4002,
-                        NotAuthenticated = 4003,
-                        AuthenticationFailed = 4004,
-                        AlreadyAuthenticated = 4005,
-                        InvalidSeq = 4007,
-                        RateLimited = 4008,
-                        SessionTimedOut = 4009,
-                        InvalidShard = 4010,
-                        ShardingRequired = 4011,
-                        InvalidApiVersion = 4012,
-                        InvalidIntents = 4013,
-                        DisallowedIntents = 4014,
-
-                        _,
-
-                        pub fn format(code: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-                            try writer.print("{d}: {s}", .{ @enumToInt(code), @tagName(code) });
-                        }
-                    };
-
-                    const code_num = std.mem.readIntBig(u16, body.chunk.data[0..2]);
-                    const code = @intToEnum(CloseEventCode, code_num);
-                    switch (code) {
-                        _ => {
-                            std.debug.print("Websocket close frame - {d}: unknown code. Reconnecting...\n", .{code_num});
-                            return error.ConnectionReset;
-                        },
-                        .UnknownError, .SessionTimedOut => {
-                            std.debug.print("Websocket close frame - {}. Reconnecting...\n", .{code});
-                            return error.ConnectionReset;
-                        },
-
-                        // Most likely user error
-                        .AuthenticationFailed => return error.AuthenticationFailed,
-                        .AlreadyAuthenticated => return error.AlreadyAuthenticated,
-                        .DecodeError => return error.DecodeError,
-                        .UnknownOpcode => return error.UnknownOpcode,
-                        .RateLimited => return error.WoahNelly,
-                        .DisallowedIntents => return error.DisallowedIntents,
-
-                        // We don't support these yet
-                        .InvalidSeq => unreachable,
-                        .InvalidShard => unreachable,
-                        .ShardingRequired => unreachable,
-                        .InvalidApiVersion => unreachable,
-
-                        // This library fucked up
-                        .NotAuthenticated => unreachable,
-                        .InvalidIntents => unreachable,
-                    }
-                },
+                .Close => try self.processCloseEvent(),
                 .Binary => return error.WtfBinary,
                 else => return error.WtfWtf,
             }
