@@ -1,7 +1,6 @@
 [submodule "lib/zig-bearssl"]
 	path = lib/zig-bearssl
-	url = https://github.com/fengb/zig-bearssl
-	branch = patch-1
+	url = https://github.com/MasterQ32/zig-bearssl
 [submodule "lib/wz"]
 	path = lib/wz
 	url = https://github.com/truemedian/wz

@@ -33,10 +33,10 @@ pub fn build(b: *std.build.Builder) void {
     });
     exe.addPackage(.{
         .name = "zig-bearssl",
-        .path = "lib/zig-bearssl/bearssl.zig",
+        .path = "lib/zig-bearssl/src/lib.zig",
     });
 
-    @import("lib/zig-bearssl/bearssl.zig").linkBearSSL("./lib/zig-bearssl", exe, target);
+    @import("lib/zig-bearssl/src/lib.zig").linkBearSSL("./lib/zig-bearssl", exe, target);
     exe.install();
 
     const run_cmd = exe.run();

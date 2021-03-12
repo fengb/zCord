@@ -242,7 +242,7 @@ pub const DiscordWs = struct {
             .pem = @embedFile("../discord-gg-chain.pem"),
             .host = "gateway.discord.gg",
         });
-        errdefer self.ssl_tunnel.?.deinit();
+        errdefer self.disconnect();
 
         self.client = wz.base.client.create(
             &self.client_buffer,
