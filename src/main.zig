@@ -47,55 +47,7 @@ fn Buffer(comptime max_len: usize) type {
     };
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-
-    var auth_buf: [0x100]u8 = undefined;
-    const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
-
-    var discord_ws = try DiscordWs.init(.{
-        .allocator = &gpa.allocator,
-        .auth_token = auth,
-        .intents = .{ .guild_messages = true },
-    });
-    defer discord_ws.deinit();
-
-    discord_ws.run({}, struct {
-        fn handleDispatch(_: void, name: []const u8, data: anytype) !void {
-            if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
-
-            var msg_buffer: [0x1000]u8 = undefined;
-            var msg: ?[]u8 = null;
-            var channel_id: ?u64 = null;
-
-            while (try data.objectMatchUnion(enum { content, channel_id })) |match| switch (match) {
-                .content => |el_content| {
-                    msg = el_content.stringBuffer(&msg_buffer) catch |err| switch (err) {
-                        error.NoSpaceLeft => &msg_buffer,
-                        else => |e| return e,
-                    };
-                    _ = try el_content.finalizeToken();
-                },
-                .channel_id => |el_channel| {
-                    var buf: [0x100]u8 = undefined;
-                    const channel_string = try el_channel.stringBuffer(&buf);
-                    channel_id = try std.fmt.parseInt(u64, channel_string, 10);
-                },
-            };
-
-            if (msg != null and channel_id != null) {
-                std.debug.print(">> {d} -- {s}\n", .{ channel_id.?, msg.? });
-            }
-        }
-    }) catch |err| switch (err) {
-        error.AuthenticationFailed => |e| return e,
-        else => @panic(@errorName(err)),
-    };
-
-    std.debug.print("Exited: {}\n", .{discord_ws.client});
-}
-
-pub const DiscordWs = struct {
+pub const Client = struct {
     allocator: *std.mem.Allocator,
 
     auth_token: []const u8,
@@ -104,8 +56,8 @@ pub const DiscordWs = struct {
     connect_info: ?ConnectInfo,
 
     ssl_tunnel: ?*request.SslTunnel,
-    client: wz.base.client.BaseClient(request.SslTunnel.Client.Reader, request.SslTunnel.Client.Writer),
-    client_buffer: [0x1000]u8,
+    wz: wz.base.client.BaseClient(request.SslTunnel.Client.Reader, request.SslTunnel.Client.Writer),
+    wz_buffer: [0x1000]u8,
     write_mutex: std.Thread.Mutex,
 
     heartbeat: Heartbeat,
@@ -202,13 +154,13 @@ pub const DiscordWs = struct {
         name: []const u8,
     };
 
-    pub fn init(args: struct {
+    pub fn create(args: struct {
         allocator: *std.mem.Allocator,
         auth_token: []const u8,
         intents: Intents,
         presence: Presence = .{},
-    }) !*DiscordWs {
-        const result = try args.allocator.create(DiscordWs);
+    }) !*Client {
+        const result = try args.allocator.create(Client);
         errdefer args.allocator.destroy(result);
         result.allocator = args.allocator;
 
@@ -226,7 +178,7 @@ pub const DiscordWs = struct {
         return result;
     }
 
-    pub fn deinit(self: *DiscordWs) void {
+    pub fn destroy(self: *Client) void {
         if (self.ssl_tunnel) |ssl_tunnel| {
             ssl_tunnel.deinit();
         }
@@ -234,7 +186,7 @@ pub const DiscordWs = struct {
         self.allocator.destroy(self);
     }
 
-    fn connect(self: *DiscordWs) !ConnectInfo {
+    fn connect(self: *Client) !ConnectInfo {
         std.debug.assert(self.ssl_tunnel == null);
         self.ssl_tunnel = try request.SslTunnel.init(.{
             .allocator = self.allocator,
@@ -242,18 +194,18 @@ pub const DiscordWs = struct {
         });
         errdefer self.disconnect();
 
-        self.client = wz.base.client.create(
-            &self.client_buffer,
+        self.wz = wz.base.client.create(
+            &self.wz_buffer,
             self.ssl_tunnel.?.client.reader(),
             self.ssl_tunnel.?.client.writer(),
         );
 
         // Handshake
-        try self.client.handshakeStart("/?v=6&encoding=json");
-        try self.client.handshakeAddHeaderValue("Host", "gateway.discord.gg");
-        try self.client.handshakeFinish();
+        try self.wz.handshakeStart("/?v=6&encoding=json");
+        try self.wz.handshakeAddHeaderValue("Host", "gateway.discord.gg");
+        try self.wz.handshakeFinish();
 
-        if (try self.client.next()) |event| {
+        if (try self.wz.next()) |event| {
             std.debug.assert(event == .header);
         }
 
@@ -263,10 +215,10 @@ pub const DiscordWs = struct {
             .session_id = .{},
         };
 
-        var flush_error: util.ErrorOf(self.client.flushReader)!void = {};
+        var flush_error: util.ErrorOf(self.wz.flushReader)!void = {};
         {
-            var stream = util.streamJson(self.client.reader());
-            defer self.client.flushReader() catch |err| {
+            var stream = util.streamJson(self.wz.reader());
+            defer self.wz.flushReader() catch |err| {
                 flush_error = err;
             };
             errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
@@ -315,15 +267,15 @@ pub const DiscordWs = struct {
             .presence = self.presence,
         });
 
-        if (try self.client.next()) |event| {
+        if (try self.wz.next()) |event| {
             if (event.header.opcode == .Close) {
                 try self.processCloseEvent();
             }
         }
 
         {
-            var stream = util.streamJson(self.client.reader());
-            defer self.client.flushReader() catch |err| {
+            var stream = util.streamJson(self.wz.reader());
+            defer self.wz.flushReader() catch |err| {
                 flush_error = err;
             };
             errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
@@ -361,14 +313,14 @@ pub const DiscordWs = struct {
         return result;
     }
 
-    fn disconnect(self: *DiscordWs) void {
+    fn disconnect(self: *Client) void {
         if (self.ssl_tunnel) |ssl_tunnel| {
             ssl_tunnel.deinit();
             self.ssl_tunnel = null;
         }
     }
 
-    pub fn run(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
+    pub fn run(self: *Client, ctx: anytype, handler: anytype) !void {
         var reconnect_wait: u64 = 1;
         while (true) {
             self.connect_info = self.connect() catch |err| switch (err) {
@@ -395,8 +347,8 @@ pub const DiscordWs = struct {
         }
     }
 
-    fn processCloseEvent(self: *DiscordWs) !void {
-        const event = (try self.client.next()).?;
+    fn processCloseEvent(self: *Client) !void {
+        const event = (try self.wz.next()).?;
 
         const CloseEventCode = enum(u16) {
             UnknownError = 4000,
@@ -453,14 +405,14 @@ pub const DiscordWs = struct {
         }
     }
 
-    pub fn listen(self: *DiscordWs, ctx: anytype, handler: anytype) !void {
-        while (try self.client.next()) |event| {
+    pub fn listen(self: *Client, ctx: anytype, handler: anytype) !void {
+        while (try self.wz.next()) |event| {
             switch (event.header.opcode) {
                 .Text => {
-                    self.processChunks(self.client.reader(), ctx, handler) catch |err| {
+                    self.processChunks(self.wz.reader(), ctx, handler) catch |err| {
                         std.debug.print("Process chunks failed: {s}\n", .{err});
                     };
-                    try self.client.flushReader();
+                    try self.wz.flushReader();
                 },
                 .Ping, .Pong => {},
                 .Close => try self.processCloseEvent(),
@@ -473,7 +425,7 @@ pub const DiscordWs = struct {
         return error.ConnectionReset;
     }
 
-    pub fn processChunks(self: *DiscordWs, reader: anytype, ctx: anytype, handler: anytype) !void {
+    pub fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype) !void {
         var stream = util.streamJson(reader);
         errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
 
@@ -513,7 +465,7 @@ pub const DiscordWs = struct {
         };
     }
 
-    pub fn sendCommand(self: *DiscordWs, opcode: Opcode, data: anytype) !void {
+    pub fn sendCommand(self: *Client, opcode: Opcode, data: anytype) !void {
         const ssl_tunnel = self.ssl_tunnel orelse return error.NotConnected;
 
         var buf: [0x1000]u8 = undefined;
@@ -527,8 +479,8 @@ pub const DiscordWs = struct {
         const held = self.write_mutex.acquire();
         defer held.release();
 
-        try self.client.writeHeader(.{ .opcode = .Text, .length = msg.len });
-        try self.client.writeChunk(msg);
+        try self.wz.writeHeader(.{ .opcode = .Text, .length = msg.len });
+        try self.wz.writeChunk(msg);
     }
 };
 

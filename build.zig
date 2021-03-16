@@ -11,36 +11,57 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zCord", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    const lib = b.addStaticLibrary("zCord", "src/main.zig");
+    lib.setBuildMode(mode);
+    lib.install();
+    for (packages.all) |pkg| {
+        lib.addPackage(pkg);
+    }
 
     var main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 
+    stepExample(b, "print-bot");
+}
+
+fn stepExample(b: *std.build.Builder, name: []const u8) void {
+    const filename = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch unreachable;
+    const mode = b.standardReleaseOptions();
+    const exe = b.addExecutable(name, filename);
+    exe.setBuildMode(mode);
+    exe.addPackage(.{
+        .name = "zCord",
+        .path = "src/main.zig",
+        .dependencies = packages.all,
+    });
+
+    const run_cmd = exe.run();
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const cmd_name = std.fmt.allocPrint(b.allocator, "example:{s}", .{name}) catch unreachable;
+    const run_step = b.step(cmd_name, filename);
+    run_step.dependOn(&run_cmd.step);
+}
+
+const packages = struct {
+    const iguanaTLS = std.build.Pkg{
+        .name = "iguanaTLS",
+        .path = "lib/iguanaTLS/src/main.zig",
+    };
     const hzzp = std.build.Pkg{
         .name = "hzzp",
         .path = "lib/hzzp/src/main.zig",
     };
-
-    exe.addPackage(hzzp);
-    exe.addPackage(.{
+    const wz = std.build.Pkg{
         .name = "wz",
         .path = "lib/wz/src/main.zig",
         .dependencies = &[_]std.build.Pkg{hzzp},
-    });
-    exe.addPackage(.{
-        .name = "iguanaTLS",
-        .path = "lib/iguanaTLS/src/main.zig",
-    });
+    };
 
-    exe.install();
-
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-}
+    const all = &[_]std.build.Pkg{ iguanaTLS, hzzp, wz };
+};
