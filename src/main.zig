@@ -9,6 +9,8 @@ const util = @import("util.zig");
 
 const agent = "zCord/0.0.1";
 
+pub const root_ca = request.root_ca;
+
 fn Buffer(comptime max_len: usize) type {
     return struct {
         data: [max_len]u8 = undefined,

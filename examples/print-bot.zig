@@ -3,9 +3,12 @@ const zCord = @import("zCord");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
+
+    try zCord.root_ca.preload(&gpa.allocator);
 
     var bot = try zCord.Client.create(.{
         .allocator = &gpa.allocator,

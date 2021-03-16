@@ -4,18 +4,21 @@ const iguanaTLS = @import("iguanaTLS");
 
 const bot_agent = "zCord/0.0.1";
 
-const ca = struct {
+pub const root_ca = struct {
     const pem = @embedFile("../cacert.pem");
-    var _trust_anchor_buffer: [0x100000]u8 = undefined;
-    var _trust_anchor_chain: ?iguanaTLS.x509.TrustAnchorChain = null;
+    var trust_anchor_chain: ?iguanaTLS.x509.TrustAnchorChain = null;
 
-    pub fn trustChain() iguanaTLS.x509.TrustAnchorChain {
-        if (_trust_anchor_chain == null) {
-            var fbs = std.io.fixedBufferStream(ca.pem);
-            var fba = std.heap.FixedBufferAllocator.init(&_trust_anchor_buffer);
-            _trust_anchor_chain = iguanaTLS.x509.TrustAnchorChain.from_pem(&fba.allocator, fbs.reader()) catch unreachable;
-        }
-        return _trust_anchor_chain.?;
+    /// Initializes the bundled root certificates
+    /// This is a shared chain that's used whenever an PEM is not passed in
+    pub fn preload(allocator: *std.mem.Allocator) !void {
+        std.debug.assert(trust_anchor_chain == null);
+        var fbs = std.io.fixedBufferStream(pem);
+        trust_anchor_chain = try iguanaTLS.x509.TrustAnchorChain.from_pem(allocator, fbs.reader());
+    }
+
+    pub fn deinit() void {
+        trust_anchor_chain.?.deinit();
+        trust_anchor_chain = null;
     }
 };
 
@@ -42,7 +45,7 @@ pub const SslTunnel = struct {
             var fbs = std.io.fixedBufferStream(pem);
             break :blk try iguanaTLS.x509.TrustAnchorChain.from_pem(args.allocator, fbs.reader());
         } else
-            ca.trustChain();
+            root_ca.trust_anchor_chain.?;
         defer if (args.pem) |_| trusted_chain.deinit();
 
         result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
