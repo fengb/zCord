@@ -4,6 +4,21 @@ const iguanaTLS = @import("iguanaTLS");
 
 const bot_agent = "zCord/0.0.1";
 
+const ca = struct {
+    const pem = @embedFile("../cacert.pem");
+    var _trust_anchor_buffer: [0x100000]u8 = undefined;
+    var _trust_anchor_chain: ?iguanaTLS.x509.TrustAnchorChain = null;
+
+    pub fn trustChain() iguanaTLS.x509.TrustAnchorChain {
+        if (_trust_anchor_chain == null) {
+            var fbs = std.io.fixedBufferStream(ca.pem);
+            var fba = std.heap.FixedBufferAllocator.init(&_trust_anchor_buffer);
+            _trust_anchor_chain = iguanaTLS.x509.TrustAnchorChain.from_pem(&fba.allocator, fbs.reader()) catch unreachable;
+        }
+        return _trust_anchor_chain.?;
+    }
+};
+
 pub const SslTunnel = struct {
     allocator: *std.mem.Allocator,
 
@@ -14,18 +29,21 @@ pub const SslTunnel = struct {
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
-        pem: []const u8,
         host: [:0]const u8,
         port: u16 = 443,
+        pem: ?[]const u8 = null,
     }) !*SslTunnel {
         const result = try args.allocator.create(SslTunnel);
         errdefer args.allocator.destroy(result);
 
         result.allocator = args.allocator;
 
-        var fbs = std.io.fixedBufferStream(args.pem);
-        const trusted_chain = try iguanaTLS.x509.TrustAnchorChain.from_pem(args.allocator, fbs.reader());
-        defer trusted_chain.deinit();
+        const trusted_chain = if (args.pem) |pem| blk: {
+            var fbs = std.io.fixedBufferStream(pem);
+            break :blk try iguanaTLS.x509.TrustAnchorChain.from_pem(args.allocator, fbs.reader());
+        } else
+            ca.trustChain();
+        defer if (args.pem) |_| trusted_chain.deinit();
 
         result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
         errdefer result.tcp_conn.close();
@@ -33,9 +51,8 @@ pub const SslTunnel = struct {
         result.client = try iguanaTLS.client_connect(.{
             .reader = result.tcp_conn.reader(),
             .writer = result.tcp_conn.writer(),
-            //.cert_verifier = .default,
-            //.trusted_certificates = trusted_chain.data.items,
-            .cert_verifier = .none,
+            .cert_verifier = .default,
+            .trusted_certificates = trusted_chain.data.items,
             .temp_allocator = args.allocator,
         }, args.host);
         errdefer client.close_notify() catch {};
@@ -60,17 +77,17 @@ pub const Https = struct {
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
-        pem: []const u8,
         host: [:0]const u8,
         port: u16 = 443,
         method: []const u8,
         path: []const u8,
+        pem: ?[]const u8,
     }) !Https {
         var ssl_tunnel = try SslTunnel.init(.{
             .allocator = args.allocator,
-            .pem = args.pem,
             .host = args.host,
             .port = args.port,
+            .pem = args.pem,
         });
         errdefer ssl_tunnel.deinit();
 

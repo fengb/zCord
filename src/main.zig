@@ -238,7 +238,6 @@ pub const DiscordWs = struct {
         std.debug.assert(self.ssl_tunnel == null);
         self.ssl_tunnel = try request.SslTunnel.init(.{
             .allocator = self.allocator,
-            .pem = @embedFile("../discord-gg-chain.pem"),
             .host = "gateway.discord.gg",
         });
         errdefer self.disconnect();
@@ -374,7 +373,7 @@ pub const DiscordWs = struct {
         while (true) {
             self.connect_info = self.connect() catch |err| switch (err) {
                 error.AuthenticationFailed => |e| return e,
-                // error.CertificateVerificationFailed => |e| return e,
+                error.CertificateVerificationFailed => |e| return e,
                 else => {
                     std.debug.print("Connect error: {s}\n", .{@errorName(err)});
                     std.time.sleep(reconnect_wait * std.time.ns_per_s);
