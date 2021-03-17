@@ -22,7 +22,7 @@ pub const root_ca = struct {
     }
 };
 
-pub const SslTunnel = struct {
+pub const Tunnel = struct {
     allocator: *std.mem.Allocator,
 
     client: Client,
@@ -35,8 +35,8 @@ pub const SslTunnel = struct {
         host: [:0]const u8,
         port: u16 = 443,
         pem: ?[]const u8 = null,
-    }) !*SslTunnel {
-        const result = try args.allocator.create(SslTunnel);
+    }) !*Tunnel {
+        const result = try args.allocator.create(Tunnel);
         errdefer args.allocator.destroy(result);
 
         result.allocator = args.allocator;
@@ -63,20 +63,20 @@ pub const SslTunnel = struct {
         return result;
     }
 
-    pub fn deinit(self: *SslTunnel) void {
+    pub fn deinit(self: *Tunnel) void {
         self.client.close_notify() catch {};
         self.tcp_conn.close();
         self.allocator.destroy(self);
     }
 };
 
-pub const Https = struct {
+pub const Request = struct {
     allocator: *std.mem.Allocator,
-    ssl_tunnel: *SslTunnel,
+    tunnel: *Tunnel,
     buffer: []u8,
     client: HzzpClient,
 
-    const HzzpClient = hzzp.base.client.BaseClient(SslTunnel.Stream.DstReader, SslTunnel.Stream.DstWriter);
+    const HzzpClient = hzzp.base.client.BaseClient(Tunnel.Stream.DstReader, Tunnel.Stream.DstWriter);
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
@@ -86,18 +86,18 @@ pub const Https = struct {
         path: []const u8,
         pem: ?[]const u8,
     }) !Https {
-        var ssl_tunnel = try SslTunnel.init(.{
+        var tunnel = try Tunnel.init(.{
             .allocator = args.allocator,
             .host = args.host,
             .port = args.port,
             .pem = args.pem,
         });
-        errdefer ssl_tunnel.deinit();
+        errdefer tunnel.deinit();
 
         const buffer = try args.allocator.alloc(u8, 0x1000);
         errdefer args.allocator.free(buffer);
 
-        var client = hzzp.base.client.create(buffer, ssl_tunnel.conn.reader(), ssl_tunnel.conn.writer());
+        var client = hzzp.base.client.create(buffer, tunnel.conn.reader(), tunnel.conn.writer());
 
         try client.writeStatusLine(args.method, args.path);
 
@@ -106,14 +106,14 @@ pub const Https = struct {
 
         return Https{
             .allocator = args.allocator,
-            .ssl_tunnel = ssl_tunnel,
+            .tunnel = tunnel,
             .buffer = buffer,
             .client = client,
         };
     }
 
     pub fn deinit(self: *Https) void {
-        self.ssl_tunnel.deinit();
+        self.tunnel.deinit();
         self.allocator.free(self.buffer);
         self.* = undefined;
     }
@@ -124,7 +124,7 @@ pub const Https = struct {
         try self.client.finishHeaders();
 
         try self.client.writer.print(fmt, args);
-        try self.ssl_tunnel.conn.flush();
+        try self.tunnel.conn.flush();
     }
 
     pub fn expectSuccessStatus(self: *Https) !u16 {

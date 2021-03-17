@@ -1,6 +1,6 @@
 const std = @import("std");
-const Client = @import("main.zig").Client;
-const util = @import("util.zig");
+const Client = @import("../Client.zig");
+const util = @import("../util.zig");
 
 const Heartbeat = @This();
 mailbox: util.Mailbox(enum { start, ack, stop, terminate }),
