@@ -2,8 +2,6 @@ const std = @import("std");
 const hzzp = @import("hzzp");
 const iguanaTLS = @import("iguanaTLS");
 
-const bot_agent = "zCord/0.0.1";
-
 pub const root_ca = struct {
     const pem = @embedFile("../cacert.pem");
     var trust_anchor_chain: ?iguanaTLS.x509.TrustAnchorChain = null;
@@ -74,18 +72,18 @@ pub const Request = struct {
     allocator: *std.mem.Allocator,
     tunnel: *Tunnel,
     buffer: []u8,
-    client: HzzpClient,
+    client: hzzp.base.client.BaseClient(Tunnel.Client.Reader, Tunnel.Client.Writer),
 
-    const HzzpClient = hzzp.base.client.BaseClient(Tunnel.Stream.DstReader, Tunnel.Stream.DstWriter);
+    pub const Method = enum { GET, POST, PUT, DELETE, PATCH };
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
         host: [:0]const u8,
         port: u16 = 443,
-        method: []const u8,
+        method: Method,
         path: []const u8,
-        pem: ?[]const u8,
-    }) !Https {
+        pem: ?[]const u8 = null,
+    }) !Request {
         var tunnel = try Tunnel.init(.{
             .allocator = args.allocator,
             .host = args.host,
@@ -97,14 +95,13 @@ pub const Request = struct {
         const buffer = try args.allocator.alloc(u8, 0x1000);
         errdefer args.allocator.free(buffer);
 
-        var client = hzzp.base.client.create(buffer, tunnel.conn.reader(), tunnel.conn.writer());
+        var client = hzzp.base.client.create(buffer, tunnel.client.reader(), tunnel.client.writer());
 
-        try client.writeStatusLine(args.method, args.path);
+        try client.writeStatusLine(@tagName(args.method), args.path);
 
         try client.writeHeaderValue("Host", args.host);
-        try client.writeHeaderValue("User-Agent", bot_agent);
 
-        return Https{
+        return Request{
             .allocator = args.allocator,
             .tunnel = tunnel,
             .buffer = buffer,
@@ -112,22 +109,21 @@ pub const Request = struct {
         };
     }
 
-    pub fn deinit(self: *Https) void {
+    pub fn deinit(self: *Request) void {
         self.tunnel.deinit();
         self.allocator.free(self.buffer);
         self.* = undefined;
     }
 
     // TODO: fix this name
-    pub fn printSend(self: *Https, comptime fmt: []const u8, args: anytype) !void {
+    pub fn printSend(self: *Request, comptime fmt: []const u8, args: anytype) !void {
         try self.client.writeHeaderFormat("Content-Length", "{d}", .{std.fmt.count(fmt, args)});
         try self.client.finishHeaders();
 
         try self.client.writer.print(fmt, args);
-        try self.tunnel.conn.flush();
     }
 
-    pub fn expectSuccessStatus(self: *Https) !u16 {
+    pub fn expectSuccessStatus(self: *Request) !u16 {
         if (try self.client.next()) |event| {
             if (event != .status) {
                 return error.MissingStatus;
@@ -156,7 +152,7 @@ pub const Request = struct {
         }
     }
 
-    pub fn completeHeaders(self: *Https) !void {
+    pub fn completeHeaders(self: *Request) !void {
         while (try self.client.next()) |event| {
             if (event == .head_done) {
                 return;

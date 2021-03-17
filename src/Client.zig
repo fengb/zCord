@@ -446,3 +446,28 @@ pub fn sendCommand(self: *Client, opcode: Opcode, data: anytype) !void {
     try self.wz.writeHeader(.{ .opcode = .Text, .length = msg.len });
     try self.wz.writeChunk(msg);
 }
+
+fn makeRequest(self: *Client, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
+    var req = try https.Request.init(.{
+        .allocator = self.allocator,
+        .host = "discord.com",
+        .method = method,
+        .path = path,
+    });
+    errdefer req.deinit();
+
+    try req.client.writeHeaderValue("User-Agent", agent);
+    try req.client.writeHeaderValue("Accept", "application/json");
+    try req.client.writeHeaderValue("Content-Type", "application/json");
+    try req.client.writeHeaderValue("Authorization", self.auth_token);
+
+    try req.printSend("{}", .{format.json(body)});
+
+    return req;
+}
+
+pub fn sendMessage(self: *Client, channel_id: u64, msg: struct { content: []const u8 }) !https.Request {
+    var buf: [0x100]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
+    return self.makeRequest(.POST, path, msg);
+}

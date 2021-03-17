@@ -28,6 +28,7 @@ pub fn build(b: *std.build.Builder) void {
     test_step.dependOn(&main_tests.step);
 
     stepExample(b, "print-bot");
+    stepExample(b, "reply-bot");
 }
 
 fn stepExample(b: *std.build.Builder, name: []const u8) void {

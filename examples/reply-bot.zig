@@ -10,15 +10,15 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    var bot = try zCord.Client.create(.{
+    var c = try zCord.Client.create(.{
         .allocator = &gpa.allocator,
         .auth_token = auth,
         .intents = .{ .guild_messages = true },
     });
-    defer bot.destroy();
+    defer c.destroy();
 
-    try bot.run({}, struct {
-        pub fn handleDispatch(_: void, name: []const u8, data: anytype) !void {
+    try c.run(c, struct {
+        pub fn handleDispatch(client: *zCord.Client, name: []const u8, data: anytype) !void {
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
             var msg_buffer: [0x1000]u8 = undefined;
@@ -40,8 +40,11 @@ pub fn main() !void {
                 },
             };
 
-            if (msg != null and channel_id != null) {
-                std.debug.print(">> {d} -- {s}\n", .{ channel_id.?, msg.? });
+            if (channel_id != null and msg != null and std.mem.eql(u8, msg.?, "Hello")) {
+                var response = try client.sendMessage(channel_id.?, .{
+                    .content = "World",
+                });
+                defer response.deinit();
             }
         }
     });
