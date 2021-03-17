@@ -18,7 +18,7 @@ pub fn main() !void {
     defer bot.destroy();
 
     try bot.run({}, struct {
-        pub fn handleDispatch(_: void, name: []const u8, data: anytype) !void {
+        pub fn handleDispatch(_: void, name: []const u8, data: zCord.JsonElement) !void {
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
             var msg_buffer: [0x1000]u8 = undefined;

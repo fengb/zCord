@@ -20,11 +20,14 @@ presence: Presence,
 connect_info: ?ConnectInfo,
 
 ssl_tunnel: ?*https.Tunnel,
-wz: wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tunnel.Client.Writer),
+wz: WzClient,
 wz_buffer: [0x1000]u8,
 write_mutex: std.Thread.Mutex,
 
 heartbeat: Heartbeat,
+
+const WzClient = wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tunnel.Client.Writer);
+pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
 
 const ConnectInfo = struct {
     heartbeat_interval_ms: u64,
