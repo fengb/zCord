@@ -471,3 +471,7 @@ pub fn sendMessage(self: *Client, channel_id: u64, msg: struct { content: []cons
     const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
     return self.makeRequest(.POST, path, msg);
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

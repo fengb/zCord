@@ -9,6 +9,4 @@ pub const root_ca = https.root_ca;
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("util.zig");
-    _ = @import("json.zig");
 }
