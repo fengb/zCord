@@ -2,10 +2,11 @@ const std = @import("std");
 const zCord = @import("zCord");
 
 pub fn main() !void {
+    // This is a shared global and should never be reclaimed
+    try zCord.root_ca.preload(std.heap.page_allocator);
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-
-    try zCord.root_ca.preload(&gpa.allocator);
 
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
