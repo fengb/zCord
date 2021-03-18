@@ -9,6 +9,7 @@ const format = @import("format.zig");
 const json = @import("json.zig");
 const util = @import("util.zig");
 
+const log = std.log.scoped(.zCord);
 const agent = "zCord/0.0.1";
 
 const Client = @This();
@@ -103,7 +104,7 @@ fn connect(self: *Client) !ConnectInfo {
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
-        errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
+        errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
         while (try root.objectMatchUnion(enum { op, d })) |match| switch (match) {
@@ -160,7 +161,7 @@ fn connect(self: *Client) !ConnectInfo {
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
-        errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
+        errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
         while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
@@ -209,7 +210,7 @@ pub fn run(self: *Client, ctx: anytype, handler: anytype) !void {
             error.AuthenticationFailed => |e| return e,
             error.CertificateVerificationFailed => |e| return e,
             else => {
-                std.debug.print("Connect error: {s}\n", .{@errorName(err)});
+                log.info("Connect error: {s}", .{@errorName(err)});
                 std.time.sleep(reconnect_wait * std.time.ns_per_s);
                 reconnect_wait = std.math.min(reconnect_wait * 2, 30);
                 continue;
@@ -236,7 +237,7 @@ fn processCloseEvent(self: *Client) !void {
     const code = @intToEnum(discord.Gateway.CloseEventCode, code_num);
     switch (code) {
         _ => {
-            std.debug.print("Websocket close frame - {d}: unknown code. Reconnecting...\n", .{code_num});
+            log.info("Websocket close frame - {d}: unknown code. Reconnecting...", .{code_num});
             return error.ConnectionReset;
         },
         .NormalClosure,
@@ -252,7 +253,7 @@ fn processCloseEvent(self: *Client) !void {
         .UnknownError,
         .SessionTimedOut,
         => {
-            std.debug.print("Websocket close frame - {d}: {s}. Reconnecting...\n", .{ @enumToInt(code), @tagName(code) });
+            log.info("Websocket close frame - {d}: {s}. Reconnecting...", .{ @enumToInt(code), @tagName(code) });
             return error.ConnectionReset;
         },
 
@@ -286,7 +287,7 @@ fn listen(self: *Client, ctx: anytype, handler: anytype) !void {
         switch (event.header.opcode) {
             .Text => {
                 self.processChunks(self.wz.reader(), ctx, handler) catch |err| {
-                    std.debug.print("Process chunks failed: {s}\n", .{err});
+                    log.info("Process chunks failed: {s}", .{err});
                 };
                 try self.wz.flushReader();
             },
@@ -297,13 +298,13 @@ fn listen(self: *Client, ctx: anytype, handler: anytype) !void {
         }
     }
 
-    std.debug.print("Websocket close frame - {{}}: no reason provided. Reconnecting...\n", .{});
+    log.info("Websocket close frame - {{}}: no reason provided. Reconnecting...", .{});
     return error.ConnectionReset;
 }
 
 fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype) !void {
     var stream = json.stream(reader);
-    errdefer |err| std.debug.print("{}\n", .{stream.debugInfo()});
+    errdefer |err| log.info("{}", .{stream.debugInfo()});
 
     var name_buf: [32]u8 = undefined;
     var name: ?[]u8 = null;
@@ -326,7 +327,7 @@ fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype)
         .d => |el_data| {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
-                    std.debug.print("<< {d} -- {s}\n", .{ self.connect_info.?.seq, name });
+                    log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
                     try handler.handleDispatch(
                         ctx,
                         name orelse return error.DispatchWithoutName,

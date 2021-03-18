@@ -2,6 +2,8 @@ const std = @import("std");
 const Client = @import("../Client.zig");
 const util = @import("../util.zig");
 
+const log = std.log.scoped(.zCord);
+
 const Heartbeat = @This();
 mailbox: util.Mailbox(enum { start, ack, stop, terminate }),
 handler: *std.Thread,
@@ -39,7 +41,7 @@ fn threadHandler(client: *Client) void {
                 switch (msg) {
                     .start => {},
                     .ack => {
-                        std.debug.print("<< ♥\n", .{});
+                        log.info("<< ♥", .{});
                         ack = true;
                     },
                     .stop => heartbeat_interval_ms = 0,
@@ -51,17 +53,17 @@ fn threadHandler(client: *Client) void {
             if (ack) {
                 ack = false;
                 if (client.sendCommand(.heartbeat, client.connect_info.?.seq)) |_| {
-                    std.debug.print(">> ♡\n", .{});
+                    log.info(">> ♡", .{});
                     continue;
                 } else |_| {
-                    std.debug.print("Heartbeat send failed. Reconnecting...\n", .{});
+                    log.info("Heartbeat send failed. Reconnecting...", .{});
                 }
             } else {
-                std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
+                log.info("Missed heartbeat. Reconnecting...", .{});
             }
 
             std.os.shutdown(client.ssl_tunnel.?.tcp_conn.handle, .both) catch |err| {
-                std.debug.print("Shutdown failed: {}\n", .{err});
+                log.warn("Shutdown failed: {}", .{err});
             };
             heartbeat_interval_ms = 0;
         }
