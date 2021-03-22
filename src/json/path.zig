@@ -5,15 +5,15 @@ const PathToken = union(enum) {
     index: u32,
     key: []const u8,
 
-    fn tokenize(string: []const u8) Iterator {
+    fn tokenize(string: []const u8) Tokenizer {
         return .{ .string = string, .index = 0 };
     }
 
-    const Iterator = struct {
+    const Tokenizer = struct {
         string: []const u8,
         index: usize,
 
-        fn next(self: *Iterator) !?PathToken {
+        fn next(self: *Tokenizer) !?PathToken {
             if (self.index >= self.string.len) return null;
 
             var token_start = self.index;
@@ -97,51 +97,104 @@ test "PathToken" {
     std.testing.expectEqual(@as(?PathToken, null), try iter.next());
 }
 
-const AstNode = union(enum) {
-    atom: struct {
-        path: []const u8,
-        type: type,
-    },
-    object: []const Object,
-    array: []const Array,
+const AstNode = struct {
+    initial_path: []const u8,
+    data: union(enum) {
+        empty: void,
+        atom: type,
+        object: []const Object,
+        array: []const Array,
+    } = .empty,
 
     const Object = struct { key: []const u8, node: AstNode };
     const Array = struct { index: usize, node: AstNode };
 
-    fn atom(comptime path: []const u8, comptime t: type) AstNode {
-        return .{ .atom = .{ .path = path, .type = t } };
-    }
-    fn object(comptime children: []const Object) AstNode {
-        return .{ .object = children };
-    }
-    fn array(comptime children: []const Array) AstNode {
-        return .{ .array = children };
+    fn init(comptime T: type) !AstNode {
+        var result = AstNode{ .initial_path = "" };
+        for (std.meta.fields(T)) |field| {
+            var tokenizer = PathToken.tokenize(field.name);
+            try result.insert(field.field_type, &tokenizer);
+        }
+        return result;
     }
 
-    fn init(comptime T: type) AstNode {
-        return AstNode.object(&[_]Object{
-            .{ .key = "foo", .node = atom("foo", bool) },
-            .{ .key = "bar", .node = atom("bar", u32) },
-            .{ .key = "baz", .node = atom("baz", []const u8) },
-        });
+    fn insert(comptime self: *AstNode, comptime T: type, tokenizer: *PathToken.Tokenizer) error{Collision}!void {
+        const token = (try tokenizer.next()) orelse {
+            if (self.data != .empty) return error.Collision;
+
+            self.data = .{ .atom = T };
+            return;
+        };
+
+        switch (token) {
+            .index => |index| {
+                switch (self.data) {
+                    .array => {},
+                    .empty => {
+                        self.data = .{ .array = &.{} };
+                    },
+                    else => return error.Collision,
+                }
+                for (self.data.array) |*node| {
+                    if (node.index == index) {
+                        try n.insert(T, tokenizer);
+                    }
+                } else {
+                    var new_node = AstNode{ .initial_path = tokenizer.string };
+                    try new_node.insert(T, tokenizer);
+                    self.data.object = self.data.object ++ [_]Object{
+                        .{ .key = key, .node = new_node },
+                    };
+                }
+            },
+            .key => |key| {
+                switch (self.data) {
+                    .object => {},
+                    .empty => {
+                        self.data = .{ .object = &.{} };
+                    },
+                    else => return error.Collision,
+                }
+                for (self.data.object) |*node| {
+                    if (std.mem.eql(u8, node.key, key)) {
+                        try node.insert(T, tokenizer);
+                    }
+                } else {
+                    var new_node = AstNode{ .initial_path = tokenizer.string };
+                    try new_node.insert(T, tokenizer);
+                    self.data.object = self.data.object ++ [_]Object{
+                        .{ .key = key, .node = new_node },
+                    };
+                }
+            },
+        }
     }
 
     fn apply(comptime self: AstNode, allocator: ?*std.mem.Allocator, json_element: anytype, result: anytype) !void {
-        switch (self) {
-            .atom => |at| {
-                @field(result, at.path) = switch (at.type) {
+        switch (self.data) {
+            .empty => unreachable,
+            .atom => |AtomType| {
+                @field(result, self.initial_path) = switch (AtomType) {
                     bool => try json_element.boolean(),
+                    ?bool => try json_element.optionalBoolean(),
                     []const u8, []u8 => try (try json_element.stringReader()).readAllAlloc(allocator.?, std.math.maxInt(usize)),
-                    else => try json_element.number(at.type),
+                    else => switch (@typeInfo(AtomType)) {
+                        .Float, .Int => try json_element.number(AtomType),
+                        .Optional => |o_info| switch (@typeInfo(o_info.child)) {
+                            .Float, .Int => try json_element.optionalNumber(o_info.child),
+                            else => @compileError("Type not supported " ++ @typeName(AtomType)),
+                        },
+                        else => @compileError("Type not supported " ++ @typeName(AtomType)),
+                    },
                 };
             },
-            .object => |obj| {
-                comptime var matches: [obj.len][]const u8 = undefined;
-                comptime for (obj) |directive, i| {
+            .object => |object| {
+                comptime var matches: [object.len][]const u8 = undefined;
+                comptime for (object) |directive, i| {
                     matches[i] = directive.key;
                 };
                 while (try json_element.objectMatchAny(&matches)) |item| match: {
-                    inline for (obj) |directive| {
+                    inline for (object) |directive| {
                         if (std.mem.eql(u8, directive.key, item.key)) {
                             try directive.node.apply(allocator, item.value, result);
                             break :match;
@@ -150,12 +203,13 @@ const AstNode = union(enum) {
                     unreachable;
                 }
             },
-            .array => |arr| {
+            .array => |array| {
                 var i: usize = 0;
-                while (try json_element.arrayNext()) |item| : (i += 1) {
-                    inline for (arr) |child| {
+                while (try json_element.arrayNext()) |item| : (i += 1) match: {
+                    inline for (array) |child| {
                         if (child.index == i) {
                             try child.node.apply(json_element, result);
+                            break :match;
                         }
                     }
                 }
@@ -166,7 +220,7 @@ const AstNode = union(enum) {
 
 pub fn match(allocator: ?*std.mem.Allocator, json_element: anytype, comptime T: type) !T {
     var result: T = undefined;
-    comptime const ast = AstNode.init(T);
+    comptime const ast = try AstNode.init(T);
     try ast.apply(allocator, json_element, &result);
     return result;
 }

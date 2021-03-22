@@ -107,19 +107,16 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        while (try root.objectMatchUnion(enum { op, d })) |match| switch (match) {
-            .op => |el_op| {
-                const op = try std.meta.intToEnum(discord.Gateway.Opcode, try el_op.number(u8));
-                if (op != .hello) {
-                    return error.MalformedHelloResponse;
-                }
-            },
-            .d => |el_data| {
-                while (try el_data.objectMatch("heartbeat_interval")) |hbi| {
-                    result.heartbeat_interval_ms = try hbi.value.number(u32);
-                }
-            },
-        };
+        const paths = try json.path.match(null, root, struct {
+            @"op": u8,
+            @"d.heartbeat_interval": u32,
+        });
+
+        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.hello)) {
+            return error.MalformedHelloResponse;
+        }
+
+        result.heartbeat_interval_ms = paths.@"d.heartbeat_interval";
     }
     try flush_error;
 
@@ -164,32 +161,27 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
-            .t => |el_type| {
-                var name_buf: [0x100]u8 = undefined;
-                const name = try el_type.stringBuffer(&name_buf);
-                if (!std.mem.eql(u8, name, "READY")) {
-                    return error.MalformedIdentify;
-                }
-            },
-            .s => |el_seq| {
-                if (try el_seq.optionalNumber(u32)) |seq| {
-                    result.seq = seq;
-                }
-            },
-            .op => |el_op| {
-                const op = try std.meta.intToEnum(discord.Gateway.Opcode, try el_op.number(u8));
-                if (op != .dispatch) {
-                    return error.MalformedIdentify;
-                }
-            },
-            .d => |el_data| {
-                while (try el_data.objectMatch("session_id")) |session_match| {
-                    const slice = try session_match.value.stringBuffer(&result.session_id.data);
-                    result.session_id.len = slice.len;
-                }
-            },
-        };
+        var buffer: [0x1000]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const paths = try json.path.match(&fba.allocator, root, struct {
+            @"t": []const u8,
+            @"s": ?u32,
+            @"op": u8,
+            @"d.session_id": []const u8,
+        });
+
+        if (!std.mem.eql(u8, paths.@"t", "READY")) {
+            return error.MalformedIdentify;
+        }
+        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.dispatch)) {
+            return error.MalformedIdentify;
+        }
+
+        if (paths.@"s") |seq| {
+            result.seq = seq;
+        }
+
+        result.session_id.copyFrom(paths.@"d.session_id");
     }
     try flush_error;
 

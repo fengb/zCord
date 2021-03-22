@@ -5,11 +5,9 @@ pub fn Fixbuf(comptime max_len: usize) type {
         data: [max_len]u8 = undefined,
         len: usize = 0,
 
-        pub fn initFrom(data: []const u8) @This() {
-            var result: @This() = undefined;
-            std.mem.copy(u8, &result.data, data);
-            result.len = data.len;
-            return result;
+        pub fn copyFrom(self: *@This(), data: []const u8) void {
+            std.mem.copy(u8, &self.data, data);
+            self.len = data.len;
         }
 
         pub fn slice(self: @This()) []const u8 {
