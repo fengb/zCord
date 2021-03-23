@@ -170,7 +170,7 @@ const AstNode = struct {
         }
     }
 
-    fn apply(comptime self: AstNode, allocator: ?*std.mem.Allocator, json_element: anytype, result: anytype) !void {
+    fn apply(comptime self: AstNode, allocator: ?*std.mem.Allocator, json_element: anytype, matches: anytype, result: anytype) !void {
         switch (self.data) {
             .empty => unreachable,
             .atom => |AtomType| {
@@ -178,6 +178,10 @@ const AstNode = struct {
                     bool => try json_element.boolean(),
                     ?bool => try json_element.optionalBoolean(),
                     []const u8, []u8 => try (try json_element.stringReader()).readAllAlloc(allocator.?, std.math.maxInt(usize)),
+                    ?[]const u8, ?[]u8 => blk: {
+                        const reader = (try json_element.optionalStringReader()) orelse break :blk null;
+                        break :blk try reader.readAllAlloc(allocator.?, std.math.maxInt(usize));
+                    },
                     else => switch (@typeInfo(AtomType)) {
                         .Float, .Int => try json_element.number(AtomType),
                         .Optional => |o_info| switch (@typeInfo(o_info.child)) {
@@ -187,16 +191,20 @@ const AstNode = struct {
                         else => @compileError("Type not supported " ++ @typeName(AtomType)),
                     },
                 };
+
+                if (@hasField(std.meta.Child(@TypeOf(matches)), self.initial_path)) {
+                    @field(matches, self.initial_path) = true;
+                }
             },
             .object => |object| {
-                comptime var matches: [object.len][]const u8 = undefined;
+                comptime var keys: [object.len][]const u8 = undefined;
                 comptime for (object) |directive, i| {
-                    matches[i] = directive.key;
+                    keys[i] = directive.key;
                 };
-                while (try json_element.objectMatchAny(&matches)) |item| match: {
+                while (try json_element.objectMatchAny(&keys)) |item| match: {
                     inline for (object) |directive| {
                         if (std.mem.eql(u8, directive.key, item.key)) {
-                            try directive.node.apply(allocator, item.value, result);
+                            try directive.node.apply(allocator, item.value, matches, result);
                             break :match;
                         }
                     }
@@ -208,7 +216,7 @@ const AstNode = struct {
                 while (try json_element.arrayNext()) |item| : (i += 1) match: {
                     inline for (array) |child| {
                         if (child.index == i) {
-                            try child.node.apply(json_element, result);
+                            try child.node.apply(json_element, matches, result);
                             break :match;
                         }
                     }
@@ -218,10 +226,62 @@ const AstNode = struct {
     }
 };
 
+fn RequiredMatches(comptime T: type) type {
+    var required_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    for (std.meta.fields(T)) |field| {
+        if (@typeInfo(field.field_type) != .Optional) {
+            required_fields = required_fields ++ [_]std.builtin.TypeInfo.StructField{
+                .{ .name = field.name, .field_type = bool, .default_value = false, .is_comptime = false, .alignment = 1 },
+            };
+        }
+    }
+    return @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = required_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+}
+
 pub fn match(allocator: ?*std.mem.Allocator, json_element: anytype, comptime T: type) !T {
-    var result: T = undefined;
     comptime const ast = try AstNode.init(T);
-    try ast.apply(allocator, json_element, &result);
+
+    var result: T = undefined;
+    inline for (std.meta.fields(T)) |field| {
+        if (@typeInfo(field.field_type) == .Optional) {
+            @field(result, field.name) = null;
+        }
+    }
+
+    var matches: RequiredMatches(T) = .{};
+
+    errdefer {
+        inline for (std.meta.fields(@TypeOf(result))) |field| {
+            switch (field.field_type) {
+                ?[]const u8, ?[]u8 => {
+                    if (@field(result, field.name)) |str| {
+                        allocator.?.free(str);
+                    }
+                },
+                []const u8, []u8 => {
+                    if (@field(matches, field.name)) {
+                        allocator.?.free(@field(result, field.name));
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    try ast.apply(allocator, json_element, &matches, &result);
+
+    inline for (std.meta.fields(@TypeOf(matches))) |field| {
+        if (!@field(matches, field.name)) {
+            return error.Required;
+        }
+    }
     return result;
 }
 
@@ -256,4 +316,37 @@ test "simple match" {
 
 fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
     std.testing.expectEqual(expected, actual);
+}
+
+test "optionals" {
+    var fbs = std.io.fixedBufferStream("{}");
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    expectEqual(root.kind, .Object);
+
+    const m = try match(std.testing.allocator, root, struct {
+        @"foo": ?bool,
+        @"bar": ?u32,
+        @"baz": ?[]const u8,
+    });
+    defer freeMatch(std.testing.allocator, m);
+
+    expectEqual(m.@"foo", null);
+    expectEqual(m.@"bar", null);
+    expectEqual(m.@"baz", null);
+}
+
+test "requireds" {
+    var fbs = std.io.fixedBufferStream("{}");
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    expectEqual(root.kind, .Object);
+
+    std.testing.expectError(error.Required, match(std.testing.allocator, root, struct {
+        @"foo": bool,
+        @"bar": u32,
+        @"baz": []const u8,
+    }));
 }

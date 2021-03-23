@@ -161,7 +161,7 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        var buffer: [0x1000]u8 = undefined;
+        var buffer: [0x10000]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
         const paths = try json.path.match(&fba.allocator, root, struct {
             @"t": []const u8,
