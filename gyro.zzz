@@ -1,0 +1,14 @@
+deps:
+  truemedian/hzzp: ^0.0.1
+  wz:
+    src:
+      github:
+        user: truemedian
+        repo: wz
+        ref: master
+  iguanaTLS:
+    src:
+      github:
+        user: alexnask
+        repo: iguanaTLS
+        ref: master
