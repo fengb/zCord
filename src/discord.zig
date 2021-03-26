@@ -1,5 +1,39 @@
 const std = @import("std");
 
+/// Discord utilizes Twitter's snowflake format for uniquely identifiable
+/// descriptors (IDs). These IDs are guaranteed to be unique across all of
+/// Discord, except in some unique scenarios in which child objects share their
+/// parent's ID. Because Snowflake IDs are up to 64 bits in size (e.g. a uint64),
+/// they are always returned as strings in the HTTP API to prevent integer
+/// overflows in some languages. See Gateway ETF/JSON for more information
+/// regarding Gateway encoding.
+pub const Snowflake = struct {
+    raw: u64,
+
+    pub fn init(num: 64) Snowflake {
+        return .{ .raw = num };
+    }
+
+    pub fn parse(str: []const u8) !Snowflake {
+        return Snowflake{
+            .raw = try std.fmt.parseInt(u64, str, 10),
+        };
+    }
+
+    /// Milliseconds since Discord Epoch, the first second of 2015 or 1420070400000.
+    pub fn getTimestamp(self: Snowflake) u64 {
+        return (self >> 22) + 1420070400000;
+    }
+
+    pub fn format(self: Snowflake, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{}", .{self.raw});
+    }
+
+    pub fn jsonStringify(self: Snowflake, options: std.json.StringifyOptions, writer: anytype) !void {
+        try writer.print("\"{}\"", .{self.raw});
+    }
+};
+
 pub const Gateway = struct {
     pub const Opcode = enum {
         /// An event was dispatched.

@@ -24,7 +24,7 @@ pub fn main() !void {
 
             var msg_buffer: [0x1000]u8 = undefined;
             var msg: ?[]u8 = null;
-            var channel_id: ?u64 = null;
+            var channel_id: ?zCord.Snowflake = null;
 
             while (try data.objectMatchUnion(enum { content, channel_id })) |match| switch (match) {
                 .content => |el_content| {
@@ -37,7 +37,7 @@ pub fn main() !void {
                 .channel_id => |el_channel| {
                     var buf: [0x100]u8 = undefined;
                     const channel_string = try el_channel.stringBuffer(&buf);
-                    channel_id = try std.fmt.parseInt(u64, channel_string, 10);
+                    channel_id = try zCord.Snowflake.parse(channel_string);
                 },
             };
 

@@ -371,7 +371,7 @@ fn makeRequest(self: *Client, method: https.Request.Method, path: []const u8, bo
     return req;
 }
 
-pub fn sendMessage(self: *Client, channel_id: u64, msg: discord.Resource.Message) !https.Request {
+pub fn sendMessage(self: *Client, channel_id: discord.Snowflake, msg: discord.Resource.Message) !https.Request {
     var buf: [0x100]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
     return self.makeRequest(.POST, path, msg);
