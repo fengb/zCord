@@ -41,9 +41,7 @@ pub fn Stream(comptime Reader: type) type {
             wrong_element: struct { wanted: ElementType, actual: ElementType },
         };
 
-        const ElementType = enum {
-            Object, Array, String, Number, Boolean, Null
-        };
+        const ElementType = enum { Object, Array, String, Number, Boolean, Null };
 
         const Error = Reader.Error || json_std.StreamingParser.Error || error{
             WrongElementType,
@@ -507,14 +505,14 @@ pub fn Stream(comptime Reader: type) type {
 
         fn assert(ctx: *Self, cond: bool) void {
             if (!cond) {
-                log.err("{}", ctx.debugInfo());
+                std.debug.print("{}", ctx.debugInfo());
                 unreachable;
             }
         }
 
         fn assertFailure(ctx: *Self, comptime fmt: []const u8, args: anytype) void {
             if (std.debug.runtime_safety) {
-                log.err("{}", .{ctx.debugInfo()});
+                std.debug.print("{}", ctx.debugInfo());
                 var buffer: [0x1000]u8 = undefined;
                 @panic(std.fmt.bufPrint(&buffer, fmt, args) catch &buffer);
             }
