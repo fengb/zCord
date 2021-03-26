@@ -1,5 +1,6 @@
 const std = @import("std");
 const json_std = @import("json/std.zig");
+pub const path = @import("json/path.zig");
 
 const log = std.log.scoped(.zCord);
 const debug_buffer = std.builtin.mode == .Debug;
@@ -142,7 +143,7 @@ pub fn Stream(comptime Reader: type) type {
 
                         return try std.fmt.parseFloat(T, try self.numberBuffer(&buffer));
                     },
-                    else => @compileError("Unsupported number type"),
+                    else => @compileError("Unsupported number type '" ++ @typeName(T) ++ "'"),
                 }
             }
 
@@ -243,6 +244,14 @@ pub fn Stream(comptime Reader: type) type {
                 try self.validateType(.String);
 
                 return StringReader{ .context = self };
+            }
+
+            pub fn optionalStringReader(self: Element) Error!?StringReader {
+                if (try self.checkOptional()) {
+                    return null;
+                } else {
+                    return try self.stringReader();
+                }
             }
 
             pub fn optionalStringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})!?[]u8 {
@@ -1101,4 +1110,8 @@ test "finalizeToken on number" {
     expectEqual(try second.finalizeToken(), null);
     expectEqual(try second.finalizeToken(), null);
     expectEqual(try second.finalizeToken(), null);
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }
