@@ -11,7 +11,7 @@ handler: *std.Thread,
 pub fn init(client: *Client) !Heartbeat {
     return Heartbeat{
         .mailbox = .{},
-        .handler = try std.Thread.spawn(client, threadHandler),
+        .handler = try std.Thread.spawn(threadHandler, client),
     };
 }
 
