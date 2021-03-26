@@ -30,7 +30,7 @@ pub const Tunnel = struct {
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
-        host: [:0]const u8,
+        host: []const u8,
         port: u16 = 443,
         pem: ?[]const u8 = null,
     }) !*Tunnel {
@@ -42,8 +42,7 @@ pub const Tunnel = struct {
         const trusted_chain = if (args.pem) |pem| blk: {
             var fbs = std.io.fixedBufferStream(pem);
             break :blk try iguanaTLS.x509.CertificateChain.from_pem(args.allocator, fbs.reader());
-        } else
-            root_ca.cert_chain.?;
+        } else root_ca.cert_chain.?;
         defer if (args.pem) |_| trusted_chain.deinit();
 
         result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
@@ -78,7 +77,7 @@ pub const Request = struct {
 
     pub fn init(args: struct {
         allocator: *std.mem.Allocator,
-        host: [:0]const u8,
+        host: []const u8,
         port: u16 = 443,
         method: Method,
         path: []const u8,
