@@ -32,9 +32,10 @@ heartbeat: Heartbeat,
 const WzClient = wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tunnel.Client.Writer);
 pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
 
-const ConnectInfo = struct {
+pub const ConnectInfo = struct {
     heartbeat_interval_ms: u64,
     seq: usize,
+    user_id: discord.Snowflake,
     session_id: util.Fixbuf(0x100),
 };
 
@@ -99,11 +100,7 @@ fn connect(self: *Client) !ConnectInfo {
         std.debug.assert(event == .header);
     }
 
-    var result = ConnectInfo{
-        .heartbeat_interval_ms = 0,
-        .seq = 0,
-        .session_id = .{},
-    };
+    var result: ConnectInfo = undefined;
 
     var flush_error: util.ErrorOf(self.wz.flushReader)!void = {};
     {
@@ -137,8 +134,9 @@ fn connect(self: *Client) !ConnectInfo {
             .seq = old_info.seq,
             .session_id = old_info.session_id.slice(),
         });
-        result.session_id = old_info.session_id;
         result.seq = old_info.seq;
+        result.user_id = old_info.user_id;
+        result.session_id = old_info.session_id;
         return result;
     }
 
@@ -175,6 +173,7 @@ fn connect(self: *Client) !ConnectInfo {
             @"s": ?u32,
             @"op": u8,
             @"d.session_id": []const u8,
+            @"d.user.id": []const u8,
         });
 
         if (!std.mem.eql(u8, paths.@"t", "READY")) {
@@ -188,6 +187,7 @@ fn connect(self: *Client) !ConnectInfo {
             result.seq = seq;
         }
 
+        result.user_id = try discord.Snowflake.parse(paths.@"d.user.id");
         result.session_id.copyFrom(paths.@"d.session_id");
     }
     try flush_error;
@@ -216,6 +216,10 @@ pub fn ws(self: *Client, handler: anytype) !void {
             },
         };
         defer self.disconnect();
+
+        if (@hasDecl(handler, "handleConnect")) {
+            handler.handleConnect(self, self.connect_info.?);
+        }
 
         reconnect_wait = 1;
 

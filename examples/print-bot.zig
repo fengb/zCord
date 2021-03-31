@@ -19,6 +19,10 @@ pub fn main() !void {
     defer bot.destroy();
 
     try bot.ws(struct {
+        pub fn handleConnect(_: *zCord.Client, info: zCord.Client.ConnectInfo) void {
+            std.debug.print("Connected as {}\n", .{info.user_id});
+        }
+
         pub fn handleDispatch(_: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
