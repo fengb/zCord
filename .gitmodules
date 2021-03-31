@@ -6,4 +6,5 @@
 	url = https://github.com/truemedian/hzzp
 [submodule "lib/iguanaTLS"]
 	path = lib/iguanaTLS
-	url = https://github.com/alexnask/iguanaTLS
+	url = https://github.com/fengb/iguanaTLS
+	branch = fix-base64

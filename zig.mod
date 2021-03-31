@@ -11,6 +11,6 @@ dependencies:
     name: hzzp
     main: src/main.zig
 
-  - src: git https://github.com/alexnask/iguanaTLS
+  - src: git https://github.com/fengb/iguanaTLS
     name: iguanaTLS
     main: src/main.zig
