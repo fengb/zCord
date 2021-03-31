@@ -16,6 +16,7 @@ const Client = @This();
 
 allocator: *std.mem.Allocator,
 
+context: ?*c_void,
 auth_token: []const u8,
 intents: discord.Gateway.Intents,
 presence: discord.Gateway.Presence,
@@ -40,6 +41,7 @@ const ConnectInfo = struct {
 pub fn create(args: struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
+    context: ?*c_void = null,
     intents: discord.Gateway.Intents,
     presence: discord.Gateway.Presence = .{},
 }) !*Client {
@@ -47,6 +49,7 @@ pub fn create(args: struct {
     errdefer args.allocator.destroy(result);
     result.allocator = args.allocator;
 
+    result.context = args.context;
     result.auth_token = args.auth_token;
     result.intents = args.intents;
     result.presence = args.presence;
@@ -67,6 +70,10 @@ pub fn destroy(self: *Client) void {
     }
     self.heartbeat.deinit();
     self.allocator.destroy(self);
+}
+
+pub fn ctx(self: *Client, comptime T: type) *T {
+    return @ptrCast(*T, self.context.?);
 }
 
 fn connect(self: *Client) !ConnectInfo {
@@ -195,7 +202,7 @@ fn disconnect(self: *Client) void {
     }
 }
 
-pub fn run(self: *Client, ctx: anytype, handler: anytype) !void {
+pub fn ws(self: *Client, handler: anytype) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         self.connect_info = self.connect() catch |err| switch (err) {
@@ -215,7 +222,7 @@ pub fn run(self: *Client, ctx: anytype, handler: anytype) !void {
         self.heartbeat.mailbox.putOverwrite(.start);
         defer self.heartbeat.mailbox.putOverwrite(.stop);
 
-        self.listen(ctx, handler) catch |err| switch (err) {
+        self.listen(handler) catch |err| switch (err) {
             error.ConnectionReset => continue,
             else => |e| return e,
         };
@@ -274,11 +281,11 @@ fn processCloseEvent(self: *Client) !void {
     }
 }
 
-fn listen(self: *Client, ctx: anytype, handler: anytype) !void {
+fn listen(self: *Client, handler: anytype) !void {
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
             .Text => {
-                self.processChunks(self.wz.reader(), ctx, handler) catch |err| {
+                self.processChunks(self.wz.reader(), handler) catch |err| {
                     log.info("Process chunks failed: {s}", .{err});
                 };
                 try self.wz.flushReader();
@@ -294,7 +301,7 @@ fn listen(self: *Client, ctx: anytype, handler: anytype) !void {
     return error.ConnectionReset;
 }
 
-fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype) !void {
+fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
     var stream = json.stream(reader);
     errdefer |err| log.info("{}", .{stream.debugInfo()});
 
@@ -304,7 +311,7 @@ fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype)
 
     const root = try stream.root();
 
-    while (try root.objectMatchUnion(enum { t, s, op, d })) |match| switch (match) {
+    while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match) {
         .t => |el_type| {
             name = try el_type.optionalStringBuffer(&name_buf);
         },
@@ -321,7 +328,7 @@ fn processChunks(self: *Client, reader: anytype, ctx: anytype, handler: anytype)
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
                     try handler.handleDispatch(
-                        ctx,
+                        self,
                         name orelse return error.DispatchWithoutName,
                         el_data,
                     );
@@ -352,7 +359,7 @@ pub fn sendCommand(self: *Client, opcode: discord.Gateway.Opcode, data: anytype)
     try self.wz.writeChunk(msg);
 }
 
-fn makeRequest(self: *Client, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
+pub fn request(self: *Client, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
     var req = try https.Request.init(.{
         .allocator = self.allocator,
         .host = "discord.com",
@@ -374,7 +381,7 @@ fn makeRequest(self: *Client, method: https.Request.Method, path: []const u8, bo
 pub fn sendMessage(self: *Client, channel_id: discord.Snowflake, msg: discord.Resource.Message) !https.Request {
     var buf: [0x100]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
-    return self.makeRequest(.POST, path, msg);
+    return self.request(.POST, path, msg);
 }
 
 test {

@@ -11,22 +11,22 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    var bot = try zCord.Client.create(.{
+    const bot = try zCord.Client.create(.{
         .allocator = &gpa.allocator,
         .auth_token = auth,
         .intents = .{ .guild_messages = true },
     });
     defer bot.destroy();
 
-    try bot.run({}, struct {
-        pub fn handleDispatch(_: void, name: []const u8, data: zCord.JsonElement) !void {
+    try bot.ws(struct {
+        pub fn handleDispatch(_: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
             var msg_buffer: [0x1000]u8 = undefined;
             var msg: ?[]u8 = null;
             var channel_id: ?zCord.Snowflake = null;
 
-            while (try data.objectMatchUnion(enum { content, channel_id })) |match| switch (match) {
+            while (try data.objectMatch(enum { content, channel_id })) |match| switch (match) {
                 .content => |el_content| {
                     msg = el_content.stringBuffer(&msg_buffer) catch |err| switch (err) {
                         error.NoSpaceLeft => &msg_buffer,

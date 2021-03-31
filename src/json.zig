@@ -299,7 +299,7 @@ pub fn Stream(comptime Reader: type) type {
                 return @Type(info);
             }
 
-            pub fn objectMatchUnion(self: Element, comptime Enum: type) !?ObjectMatchUnion(Enum) {
+            pub fn objectMatch(self: Element, comptime Enum: type) !?ObjectMatchUnion(Enum) {
                 comptime var string_keys: []const []const u8 = &.{};
                 inline for (std.meta.fields(Enum)) |field| {
                     string_keys = string_keys ++ [_][]const u8{field.name};
@@ -319,7 +319,7 @@ pub fn Stream(comptime Reader: type) type {
                 value: Element,
             };
 
-            pub fn objectMatch(self: Element, key: []const u8) Error!?ObjectMatchString {
+            pub fn objectMatchOne(self: Element, key: []const u8) Error!?ObjectMatchString {
                 return self.objectMatchAny(&[_][]const u8{key});
             }
 
@@ -914,7 +914,7 @@ test "objects ending in number" {
 
     const root = try str.root();
     while (try root.arrayNext()) |obj| {
-        if (try obj.objectMatch("banana")) |_| {
+        if (try obj.objectMatchOne("banana")) |_| {
             std.debug.panic("How did this match?", .{});
         }
     }
@@ -927,7 +927,7 @@ test "empty object" {
     const root = try str.root();
     expectEqual(root.kind, .Object);
 
-    expectEqual(try root.objectMatch(""), null);
+    expectEqual(try root.objectMatchOne(""), null);
 }
 
 test "object match" {
@@ -939,7 +939,7 @@ test "object match" {
     const root = try str.root();
     expectEqual(root.kind, .Object);
 
-    if (try root.objectMatch("foo")) |match| {
+    if (try root.objectMatchOne("foo")) |match| {
         std.testing.expectEqualSlices(u8, "foo", match.key);
         var buffer: [100]u8 = undefined;
         expectEqual(match.value.kind, .Boolean);
@@ -948,7 +948,7 @@ test "object match" {
         std.debug.panic("Expected a value", .{});
     }
 
-    if (try root.objectMatch("bar")) |match| {
+    if (try root.objectMatchOne("bar")) |match| {
         std.testing.expectEqualSlices(u8, "bar", match.key);
         var buffer: [100]u8 = undefined;
         expectEqual(match.value.kind, .Boolean);
@@ -995,14 +995,14 @@ test "object match union" {
     const root = try str.root();
     expectEqual(root.kind, .Object);
 
-    if (try root.objectMatchUnion(enum { foobar, foo })) |match| {
+    if (try root.objectMatch(enum { foobar, foo })) |match| {
         expectEqual(match.foo.kind, .Boolean);
         expectEqual(try match.foo.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
-    if (try root.objectMatchUnion(enum { foo, foobar })) |match| {
+    if (try root.objectMatch(enum { foo, foobar })) |match| {
         expectEqual(match.foobar.kind, .Boolean);
         expectEqual(try match.foobar.boolean(), false);
     } else {
@@ -1019,7 +1019,7 @@ test "object match not found" {
     const root = try str.root();
     expectEqual(root.kind, .Object);
 
-    expectEqual(try root.objectMatch("???"), null);
+    expectEqual(try root.objectMatchOne("???"), null);
 }
 
 fn expectElement(e: anytype) Stream(std.io.FixedBufferStream([]const u8).Reader).Error!void {

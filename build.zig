@@ -18,7 +18,7 @@ pub fn build(b: *std.build.Builder) void {
         lib.addPackage(pkg);
     }
 
-    var main_tests = b.addTest("src/main.zig");
+    const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
     for (packages.all) |pkg| {
         main_tests.addPackage(pkg);
@@ -26,12 +26,20 @@ pub fn build(b: *std.build.Builder) void {
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
+    for ([_][]const u8{ "print-bot", "reply-bot" }) |name| {
+        const exe = createExampleExe(b, name);
+        test_step.dependOn(&exe.step);
 
-    stepExample(b, "print-bot");
-    stepExample(b, "reply-bot");
+        const run_cmd = exe.run();
+        const run_step = b.step(
+            std.fmt.allocPrint(b.allocator, "example:{s}", .{name}) catch unreachable,
+            std.fmt.allocPrint(b.allocator, "Run example {s}", .{name}) catch unreachable,
+        );
+        run_step.dependOn(&run_cmd.step);
+    }
 }
 
-fn stepExample(b: *std.build.Builder, name: []const u8) void {
+fn createExampleExe(b: *std.build.Builder, name: []const u8) *std.build.LibExeObjStep {
     const filename = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch unreachable;
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable(name, filename);
@@ -42,14 +50,7 @@ fn stepExample(b: *std.build.Builder, name: []const u8) void {
         .dependencies = packages.all,
     });
 
-    const run_cmd = exe.run();
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const cmd_name = std.fmt.allocPrint(b.allocator, "example:{s}", .{name}) catch unreachable;
-    const run_step = b.step(cmd_name, filename);
-    run_step.dependOn(&run_cmd.step);
+    return exe;
 }
 
 const packages = struct {
