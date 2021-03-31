@@ -135,9 +135,13 @@ const AstNode = struct {
                     },
                     else => return error.Collision,
                 }
-                for (self.data.array) |*node| {
-                    if (node.index == index) {
-                        try n.insert(T, tokenizer);
+                for (self.data.array) |elem| {
+                    if (elem.index == index) {
+                        // TODO: replace this awful copy with comptime allocators
+                        var copy = self.data.array[0..self.data.array.len].*;
+                        try copy[i].node.insert(T, tokenizer);
+                        self.data.array = &copy;
+                        break;
                     }
                 } else {
                     var new_node = AstNode{ .initial_path = tokenizer.string };
@@ -155,9 +159,13 @@ const AstNode = struct {
                     },
                     else => return error.Collision,
                 }
-                for (self.data.object) |*node| {
-                    if (std.mem.eql(u8, node.key, key)) {
-                        try node.insert(T, tokenizer);
+                for (self.data.object) |elem, i| {
+                    if (std.mem.eql(u8, elem.key, key)) {
+                        // TODO: replace this awful copy with comptime allocators
+                        var copy = self.data.object[0..self.data.object.len].*;
+                        try copy[i].node.insert(T, tokenizer);
+                        self.data.object = &copy;
+                        break;
                     }
                 } else {
                     var new_node = AstNode{ .initial_path = tokenizer.string };
@@ -312,6 +320,24 @@ test "simple match" {
     expectEqual(m.@"foo", true);
     expectEqual(m.@"bar", 2);
     std.testing.expectEqualStrings(m.@"baz", "nop");
+}
+
+test "nested" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"nest": { "foo": 1, "bar": false } }
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    expectEqual(root.kind, .Object);
+
+    const m = try match(std.testing.allocator, root, struct {
+        @"nest.foo": u32,
+        @"nest.bar": bool,
+    });
+
+    expectEqual(m.@"nest.foo", 1);
+    expectEqual(m.@"nest.bar", false);
 }
 
 fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
