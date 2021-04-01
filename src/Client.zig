@@ -5,7 +5,6 @@ const wz = @import("wz");
 const Heartbeat = @import("Client/Heartbeat.zig");
 const https = @import("https.zig");
 const discord = @import("discord.zig");
-const format = @import("format.zig");
 const json = @import("json.zig");
 const util = @import("util.zig");
 
@@ -350,7 +349,7 @@ pub fn sendCommand(self: *Client, opcode: discord.Gateway.Opcode, data: anytype)
 
     var buf: [0x1000]u8 = undefined;
     const msg = try std.fmt.bufPrint(&buf, "{s}", .{
-        format.json(.{
+        json.format(.{
             .op = @enumToInt(opcode),
             .d = data,
         }),
@@ -376,7 +375,7 @@ pub fn request(self: *Client, method: https.Request.Method, path: []const u8, bo
     try req.client.writeHeaderValue("Content-Type", "application/json");
     try req.client.writeHeaderValue("Authorization", self.auth_token);
 
-    try req.printSend("{}", .{format.json(body)});
+    try req.printSend("{}", .{json.format(body)});
 
     return req;
 }

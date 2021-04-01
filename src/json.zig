@@ -5,6 +5,21 @@ pub const path = @import("json/path.zig");
 const log = std.log.scoped(.zCord);
 const debug_buffer = std.builtin.mode == .Debug;
 
+pub fn Formatter(comptime T: type) type {
+    return struct {
+        data: T,
+
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            // TODO: convert stringify options
+            return std.json.stringify(self.data, .{ .string = .{ .String = .{} } }, writer);
+        }
+    };
+}
+
+pub fn format(data: anytype) Formatter(@TypeOf(data)) {
+    return .{ .data = data };
+}
+
 pub fn stream(reader: anytype) Stream(@TypeOf(reader)) {
     return .{
         .reader = reader,
