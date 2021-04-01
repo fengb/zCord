@@ -40,7 +40,7 @@ pub fn main() !void {
             };
 
             if (channel_id != null and msg != null and std.mem.eql(u8, msg.?, "Hello")) {
-                var response = try client.sendMessage(channel_id.?, .{
+                var response = try client.sendMessage(client.allocator, channel_id.?, .{
                     .content = "World",
                 });
                 defer response.deinit();

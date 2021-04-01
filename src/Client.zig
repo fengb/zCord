@@ -362,7 +362,7 @@ pub fn sendCommand(self: *Client, opcode: discord.Gateway.Opcode, data: anytype)
     try self.wz.writeChunk(msg);
 }
 
-pub fn initRequest(self: *Client, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
+pub fn sendRequest(self: *Client, allocator: *std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
     var req = try https.Request.init(.{
         .allocator = self.allocator,
         .host = "discord.com",
@@ -390,10 +390,10 @@ pub fn initRequest(self: *Client, method: https.Request.Method, path: []const u8
     return req;
 }
 
-pub fn sendMessage(self: *Client, channel_id: discord.Snowflake(.channel), msg: discord.Resource.Message) !https.Request {
+pub fn sendMessage(self: *Client, allocator: *std.mem.Allocator, channel_id: discord.Snowflake(.channel), msg: discord.Resource.Message) !https.Request {
     var buf: [0x100]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
-    return self.initRequest(.POST, path, msg);
+    return self.sendRequest(allocator, .POST, path, msg);
 }
 
 test {
