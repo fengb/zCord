@@ -7,32 +7,34 @@ const std = @import("std");
 /// they are always returned as strings in the HTTP API to prevent integer
 /// overflows in some languages. See Gateway ETF/JSON for more information
 /// regarding Gateway encoding.
-pub const Snowflake = struct {
-    raw: u64,
+pub fn Snowflake(comptime scope: @Type(.EnumLiteral)) type {
+    return enum(u64) {
+        _,
 
-    pub fn init(num: 64) Snowflake {
-        return .{ .raw = num };
-    }
+        const Self = @This();
 
-    pub fn parse(str: []const u8) !Snowflake {
-        return Snowflake{
-            .raw = try std.fmt.parseInt(u64, str, 10),
-        };
-    }
+        pub fn init(num: u64) Self {
+            return @intToEnum(Self, num);
+        }
 
-    /// Milliseconds since Discord Epoch, the first second of 2015 or 1420070400000.
-    pub fn getTimestamp(self: Snowflake) u64 {
-        return (self >> 22) + 1420070400000;
-    }
+        pub fn parse(str: []const u8) !Self {
+            return init(try std.fmt.parseInt(u64, str, 10));
+        }
 
-    pub fn format(self: Snowflake, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("{}", .{self.raw});
-    }
+        /// Milliseconds since Discord Epoch, the first second of 2015 or 1420070400000.
+        pub fn getTimestamp(self: Self) u64 {
+            return (@enumToInt(self) >> 22) + 1420070400000;
+        }
 
-    pub fn jsonStringify(self: Snowflake, options: std.json.StringifyOptions, writer: anytype) !void {
-        try writer.print("\"{}\"", .{self.raw});
-    }
-};
+        pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            try writer.print("{}", .{@enumToInt(self)});
+        }
+
+        pub fn jsonStringify(self: Self, options: std.json.StringifyOptions, writer: anytype) !void {
+            try writer.print("\"{}\"", .{@enumToInt(self)});
+        }
+    };
+}
 
 pub const Gateway = struct {
     pub const Opcode = enum {
