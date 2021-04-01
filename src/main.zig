@@ -6,6 +6,7 @@ pub const Client = @import("Client.zig");
 pub const https = @import("https.zig");
 pub const format = @import("format.zig");
 pub const discord = @import("discord.zig");
+pub const json = @import("json.zig");
 
 pub const root_ca = https.root_ca;
 pub const JsonElement = Client.JsonElement;
