@@ -18,7 +18,18 @@ pub fn Snowflake(comptime scope: @Type(.EnumLiteral)) type {
         }
 
         pub fn parse(str: []const u8) !Self {
-            return init(try std.fmt.parseInt(u64, str, 10));
+            return init(
+                std.fmt.parseInt(u64, str, 10) catch return error.SnowflakeTooSpecial,
+            );
+        }
+
+        pub fn consumeJsonElement(elem: anytype) !Self {
+            var buf: [64]u8 = undefined;
+            const str = elem.stringBuffer(&buf) catch |err| switch (err) {
+                error.StreamTooLong => return error.SnowflakeTooSpecial,
+                else => |e| return e,
+            };
+            return try parse(str);
         }
 
         /// Milliseconds since Discord Epoch, the first second of 2015 or 1420070400000.

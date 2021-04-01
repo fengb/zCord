@@ -33,15 +33,13 @@ pub fn main() !void {
             while (try data.objectMatch(enum { content, channel_id })) |match| switch (match) {
                 .content => |el_content| {
                     msg = el_content.stringBuffer(&msg_buffer) catch |err| switch (err) {
-                        error.NoSpaceLeft => &msg_buffer,
+                        error.StreamTooLong => &msg_buffer,
                         else => |e| return e,
                     };
                     _ = try el_content.finalizeToken();
                 },
                 .channel_id => |el_channel| {
-                    var buf: [0x100]u8 = undefined;
-                    const channel_string = try el_channel.stringBuffer(&buf);
-                    channel_id = try zCord.Snowflake(.channel).parse(channel_string);
+                    channel_id = try zCord.Snowflake(.channel).consumeJsonElement(el_channel);
                 },
             };
 

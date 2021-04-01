@@ -182,9 +182,17 @@ pub fn Stream(comptime Reader: type) type {
                 return error.Overflow;
             }
 
-            pub fn stringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})![]u8 {
+            pub fn stringBuffer(self: Element, buffer: []u8) (Error || error{StreamTooLong})![]u8 {
                 const reader = try self.stringReader();
                 const size = try reader.readAll(buffer);
+                if (size == buffer.len) {
+                    if (reader.readByte()) |_| {
+                        return error.StreamTooLong;
+                    } else |err| switch (err) {
+                        error.EndOfStream => {},
+                        else => |e| return e,
+                    }
+                }
                 return buffer[0..size];
             }
 
@@ -269,7 +277,7 @@ pub fn Stream(comptime Reader: type) type {
                 }
             }
 
-            pub fn optionalStringBuffer(self: Element, buffer: []u8) (Error || error{NoSpaceLeft})!?[]u8 {
+            pub fn optionalStringBuffer(self: Element, buffer: []u8) (Error || error{StreamTooLong})!?[]u8 {
                 if (try self.checkOptional()) {
                     return null;
                 } else {
