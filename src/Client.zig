@@ -74,7 +74,7 @@ pub fn destroy(self: *Client) void {
 }
 
 pub fn ctx(self: *Client, comptime T: type) *T {
-    return @ptrCast(*T, self.context.?);
+    return @ptrCast(*T, @alignCast(@alignOf(T), self.context.?));
 }
 
 fn connect(self: *Client) !ConnectInfo {
@@ -372,7 +372,6 @@ pub fn request(self: *Client, method: https.Request.Method, path: []const u8, bo
     });
     errdefer req.deinit();
 
-    try req.client.writeHeaderValue("User-Agent", agent);
     try req.client.writeHeaderValue("Accept", "application/json");
     try req.client.writeHeaderValue("Content-Type", "application/json");
     try req.client.writeHeaderValue("Authorization", self.auth_token);

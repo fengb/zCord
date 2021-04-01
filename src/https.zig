@@ -81,6 +81,7 @@ pub const Request = struct {
         port: u16 = 443,
         method: Method,
         path: []const u8,
+        user_agent: []const u8 = "zCord/0.0.1",
         pem: ?[]const u8 = null,
     }) !Request {
         var tunnel = try Tunnel.init(.{
