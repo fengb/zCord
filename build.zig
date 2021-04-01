@@ -1,25 +1,40 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{});
+const Options = struct {
+    mode: std.builtin.Mode,
+    target: std.zig.CrossTarget,
 
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    fn apply(self: Options, lib: *std.build.LibExeObjStep) void {
+        lib.setBuildMode(self.mode);
+        lib.setTarget(self.target);
+
+        // AtomicCondition is broken so we use pthreads instead
+        lib.linkSystemLibrary("pthread");
+    }
+};
+
+pub fn build(b: *std.build.Builder) void {
+    const options = Options{
+        // Standard target options allows the person running `zig build` to choose
+        // what target to build for. Here we do not override the defaults, which
+        // means any target is allowed, and the default is native. Other options
+        // for restricting supported target set are available.
+        .target = b.standardTargetOptions(.{}),
+
+        // Standard release options allow the person running `zig build` to select
+        // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
+        .mode = b.standardReleaseOptions(),
+    };
 
     const lib = b.addStaticLibrary("zCord", "src/main.zig");
-    lib.setBuildMode(mode);
     lib.install();
+    options.apply(lib);
     for (packages.all) |pkg| {
         lib.addPackage(pkg);
     }
 
     const main_tests = b.addTest("src/main.zig");
-    main_tests.setBuildMode(mode);
+    options.apply(main_tests);
     for (packages.all) |pkg| {
         main_tests.addPackage(pkg);
     }
@@ -28,6 +43,7 @@ pub fn build(b: *std.build.Builder) void {
     test_step.dependOn(&main_tests.step);
     for ([_][]const u8{ "print-bot", "reply-bot" }) |name| {
         const exe = createExampleExe(b, name);
+        options.apply(exe);
         test_step.dependOn(&exe.step);
 
         const run_cmd = exe.run();
@@ -41,9 +57,7 @@ pub fn build(b: *std.build.Builder) void {
 
 fn createExampleExe(b: *std.build.Builder, name: []const u8) *std.build.LibExeObjStep {
     const filename = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch unreachable;
-    const mode = b.standardReleaseOptions();
     const exe = b.addExecutable(name, filename);
-    exe.setBuildMode(mode);
     exe.addPackage(.{
         .name = "zCord",
         .path = "src/main.zig",

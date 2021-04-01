@@ -52,6 +52,10 @@ pub fn ErrorOf(comptime func: anytype) type {
 }
 
 pub fn Mailbox(comptime T: type) type {
+    if (!std.Thread.use_pthreads) {
+        @compileError("zCord currently requires pthreads. Please recompile with -lpthread enabled");
+    }
+
     return struct {
         const Self = @This();
 
