@@ -119,8 +119,13 @@ pub const Request = struct {
     pub fn printSend(self: *Request, comptime fmt: []const u8, args: anytype) !void {
         try self.client.writeHeaderFormat("Content-Length", "{d}", .{std.fmt.count(fmt, args)});
         try self.client.finishHeaders();
-
         try self.client.writer.print(fmt, args);
+    }
+
+    // TODO: fix this name
+    pub fn sendEmptyBody(self: *Request) !void {
+        try self.client.finishHeaders();
+        try self.client.writePayload(null);
     }
 
     pub fn expectSuccessStatus(self: *Request) !u16 {
@@ -158,5 +163,27 @@ pub const Request = struct {
                 return;
             }
         }
+    }
+
+    pub fn debugDumpHeaders(self: *Request, writer: anytype) !void {
+        while (try self.client.next()) |event| {
+            switch (event) {
+                .header => |header| try writer.print("{s}: {s}\n", .{ header.name, header.value }),
+                .head_done => return,
+                else => unreachable,
+            }
+        }
+    }
+
+    pub fn debugDumpBody(self: *Request, writer: anytype) !void {
+        const reader = self.client.reader();
+
+        var buf: [0x1000]u8 = undefined;
+        while (true) {
+            const len = try reader.read(&buf);
+            if (len == 0) break;
+            try writer.writeAll(buf[0..len]);
+        }
+        try writer.writeAll("\n");
     }
 };
