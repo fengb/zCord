@@ -8,6 +8,7 @@ pkgs:
     files:
       README.md
       LICENSE
+      cacert.pem
       src/*.zig
       src/Client/*.zig
       src/json/*.zig
