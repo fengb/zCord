@@ -3,7 +3,7 @@ pkgs:
     version: 0.0.1
     description: "Discord API with zero allocations in the critical path"
     license: MIT
-    source_url: "https://github.com/mattnite/zCord"
+    source_url: "https://github.com/fengb/zCord"
     root: src/main.zig
     files:
       README.md
