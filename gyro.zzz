@@ -13,7 +13,7 @@ pkgs:
       src/Client/*.zig
       src/json/*.zig
 deps:
-  truemedian/hzzp: ^0.0.2
+  mattnite/hzzp: ^0.0.2
   wz:
     src:
       github:
