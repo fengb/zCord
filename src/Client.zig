@@ -227,7 +227,12 @@ pub fn ws(self: *Client, handler: anytype) !void {
 
         self.listen(handler) catch |err| switch (err) {
             error.ConnectionReset => continue,
-            else => |e| return e,
+            else => |e| {
+                // TODO: convert this to inline switch once available
+                if (!util.errSetContains(WzClient.ReadNextError, err)) {
+                    return err;
+                }
+            },
         };
     }
 }
