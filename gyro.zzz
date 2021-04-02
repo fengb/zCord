@@ -1,10 +1,11 @@
 pkgs:
   zCord:
     version: 0.0.1
-    description: "Discord API with zero allocations in the critical path"
+    root: src/main.zig
+    description: Discord API with zero allocations in the critical path
     license: MIT
     source_url: "https://github.com/fengb/zCord"
-    root: src/main.zig
+    root: src/main.zig    
     files:
       README.md
       LICENSE
@@ -13,11 +14,6 @@ pkgs:
       src/Client/*.zig
       src/json/*.zig
 deps:
-  mattnite/hzzp: ^0.0.2
-  mattnite/wz: ^0.0.0
-  iguanaTLS:
-    src:
-      github:
-        user: fengb
-        repo: iguanaTLS
-        ref: fix-base64
+  truemedian/hzzp: ^0.0.0
+  truemedian/wz: ^0.0.0
+  alexnask/iguanaTLS: ^0.0.1

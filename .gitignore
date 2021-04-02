@@ -1,3 +1,4 @@
 .*
 /zig-cache
+/gyro.lock
 /deps.zig
