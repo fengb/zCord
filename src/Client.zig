@@ -9,7 +9,7 @@ const json = @import("json.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.zCord);
-const agent = "zCord/0.0.1";
+const default_agent = "zCord/0.0.1";
 
 const Client = @This();
 
@@ -17,6 +17,7 @@ allocator: *std.mem.Allocator,
 
 context: ?*c_void,
 auth_token: []const u8,
+user_agent: []const u8,
 intents: discord.Gateway.Intents,
 presence: discord.Gateway.Presence,
 connect_info: ?ConnectInfo,
@@ -41,8 +42,9 @@ pub const ConnectInfo = struct {
 pub fn create(args: struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
+    user_agent: []const u8 = default_agent,
     context: ?*c_void = null,
-    intents: discord.Gateway.Intents,
+    intents: discord.Gateway.Intents = .{},
     presence: discord.Gateway.Presence = .{},
 }) !*Client {
     const result = try args.allocator.create(Client);
@@ -51,6 +53,7 @@ pub fn create(args: struct {
 
     result.context = args.context;
     result.auth_token = args.auth_token;
+    result.user_agent = args.user_agent;
     result.intents = args.intents;
     result.presence = args.presence;
     result.connect_info = null;
@@ -139,15 +142,16 @@ fn connect(self: *Client) !ConnectInfo {
         return result;
     }
 
+    const properties = .{
+        .@"$os" = @tagName(std.Target.current.os.tag),
+        .@"$browser" = self.user_agent,
+        .@"$device" = self.user_agent,
+    };
     try self.sendCommand(.identify, .{
         .compress = false,
         .intents = self.intents.toRaw(),
         .token = self.auth_token,
-        .properties = .{
-            .@"$os" = @tagName(std.Target.current.os.tag),
-            .@"$browser" = agent,
-            .@"$device" = agent,
-        },
+        .properties = properties,
         .presence = self.presence,
     });
 
@@ -205,8 +209,10 @@ pub fn ws(self: *Client, handler: anytype) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         self.connect_info = self.connect() catch |err| switch (err) {
-            error.AuthenticationFailed => |e| return e,
-            error.CertificateVerificationFailed => |e| return e,
+            error.AuthenticationFailed,
+            error.DisallowedIntents,
+            error.CertificateVerificationFailed,
+            => |e| return e,
             else => {
                 log.info("Connect error: {s}", .{@errorName(err)});
                 std.time.sleep(reconnect_wait * std.time.ns_per_s);
@@ -373,6 +379,7 @@ pub fn sendRequest(self: *Client, allocator: *std.mem.Allocator, method: https.R
         .host = "discord.com",
         .method = method,
         .path = path,
+        .user_agent = self.user_agent,
     });
     errdefer req.deinit();
 
