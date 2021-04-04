@@ -34,7 +34,7 @@ pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
 
 pub const ConnectInfo = struct {
     heartbeat_interval_ms: u64,
-    seq: usize,
+    seq: u32,
     user_id: discord.Snowflake(.user),
     session_id: util.Fixbuf(0x100),
 };
@@ -131,29 +131,28 @@ fn connect(self: *Client) !ConnectInfo {
     }
 
     if (self.connect_info) |old_info| {
-        try self.sendCommand(.@"resume", .{
+        try self.sendCommand(.{ .@"resume" = .{
             .token = self.auth_token,
             .seq = old_info.seq,
             .session_id = old_info.session_id.slice(),
-        });
+        } });
         result.seq = old_info.seq;
         result.user_id = old_info.user_id;
         result.session_id = old_info.session_id;
         return result;
     }
 
-    const properties = .{
-        .@"$os" = @tagName(std.Target.current.os.tag),
-        .@"$browser" = self.user_agent,
-        .@"$device" = self.user_agent,
-    };
-    try self.sendCommand(.identify, .{
+    try self.sendCommand(.{ .identify = .{
         .compress = false,
-        .intents = self.intents.toRaw(),
+        .intents = self.intents,
         .token = self.auth_token,
-        .properties = properties,
+        .properties = .{
+            .@"$os" = @tagName(std.Target.current.os.tag),
+            .@"$browser" = self.user_agent,
+            .@"$device" = self.user_agent,
+        },
         .presence = self.presence,
-    });
+    } });
 
     if (try self.wz.next()) |event| {
         if (event.header.opcode == .Close) {
@@ -355,16 +354,11 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
     };
 }
 
-pub fn sendCommand(self: *Client, opcode: discord.Gateway.Opcode, data: anytype) !void {
+pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
     const ssl_tunnel = self.ssl_tunnel orelse return error.NotConnected;
 
     var buf: [0x1000]u8 = undefined;
-    const msg = try std.fmt.bufPrint(&buf, "{s}", .{
-        json.format(.{
-            .op = @enumToInt(opcode),
-            .d = data,
-        }),
-    });
+    const msg = try std.fmt.bufPrint(&buf, "{s}", .{json.format(command)});
 
     const held = self.write_mutex.acquire();
     defer held.release();

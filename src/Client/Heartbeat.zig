@@ -52,7 +52,7 @@ fn threadHandler(client: *Client) void {
 
             if (ack) {
                 ack = false;
-                if (client.sendCommand(.heartbeat, client.connect_info.?.seq)) |_| {
+                if (client.sendCommand(.{ .heartbeat = client.connect_info.?.seq })) |_| {
                     log.info(">> ♡", .{});
                     continue;
                 } else |_| {

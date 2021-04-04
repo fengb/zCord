@@ -108,6 +108,69 @@ pub const Gateway = struct {
         _,
     };
 
+    pub const Command = union(Opcode) {
+        // TODO: remove this once nested literals work better
+        pub fn identify(data: std.meta.fieldInfo(Command, .identify).field_type) Command {
+            return .{ .identify = data };
+        }
+
+        dispatch: void,
+        reconnect: void,
+        invalid_session: void,
+        hello: void,
+        heartbeat_ack: void,
+
+        identify: struct {
+            token: []const u8,
+            properties: struct {
+                @"$os": []const u8 = @tagName(std.Target.current.os.tag),
+                @"$browser": []const u8,
+                @"$device": []const u8,
+            },
+            compress: bool = false,
+            presence: ?Presence = null,
+            intents: Intents,
+        },
+        @"resume": struct {
+            token: []const u8,
+            session_id: []const u8,
+            seq: u32,
+        },
+        heartbeat: u32,
+        request_guild_members: struct {
+            guild_id: Snowflake(.guild),
+            query: []const u8 = "",
+            limit: u32,
+            presences: bool = false,
+            user_ids: ?[]Snowflake(.user) = null,
+        },
+        voice_state_update: struct {
+            guild_id: Snowflake(.guild),
+            channel_id: ?Snowflake(.channel) = null,
+            self_mute: bool,
+            self_deaf: bool,
+        },
+        presence_update: struct {
+            since: ?u32 = null,
+            activities: ?[]Activity = null,
+            status: Status,
+            afk: bool,
+        },
+
+        pub fn jsonStringify(self: Command, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+            inline for (std.meta.fields(Opcode)) |field| {
+                const tag = @field(Opcode, field.name);
+                if (std.meta.activeTag(self) == tag) {
+                    return std.json.stringify(.{
+                        .op = @enumToInt(tag),
+                        .d = @field(self, @tagName(tag)),
+                    }, options, writer);
+                }
+            }
+            unreachable;
+        }
+    };
+
     pub const Intents = packed struct {
         guilds: bool = false,
         guild_members: bool = false,
@@ -133,22 +196,28 @@ pub const Gateway = struct {
         pub fn fromRaw(raw: u16) Intents {
             return @bitCast(Intents, self);
         }
+
+        pub fn jsonStringify(self: Intents, options: std.json.StringifyOptions, writer: anytype) !void {
+            try writer.print("{}", .{self.toRaw()});
+        }
+    };
+
+    pub const Status = enum {
+        online,
+        dnd,
+        idle,
+        invisible,
+        offline,
+
+        pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
+            try writer.writeAll("\"");
+            try writer.writeAll(@tagName(self));
+            try writer.writeAll("\"");
+        }
     };
 
     pub const Presence = struct {
-        status: enum {
-            online,
-            dnd,
-            idle,
-            invisible,
-            offline,
-
-            pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
-                try writer.writeAll("\"");
-                try writer.writeAll(@tagName(self));
-                try writer.writeAll("\"");
-            }
-        } = .online,
+        status: Status = .online,
         activities: []const Activity = &.{},
         since: ?u32 = null,
         afk: bool = false,
@@ -184,3 +253,8 @@ pub const Resource = struct {
         };
     };
 };
+
+test {
+    _ = std.testing.refAllDecls(Gateway);
+    _ = std.testing.refAllDecls(Resource);
+}
