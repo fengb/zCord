@@ -46,6 +46,7 @@ pub fn create(args: struct {
     context: ?*c_void = null,
     intents: discord.Gateway.Intents = .{},
     presence: discord.Gateway.Presence = .{},
+    heartbeat: Heartbeat.Strategy = Heartbeat.Strategy.default,
 }) !*Client {
     const result = try args.allocator.create(Client);
     errdefer args.allocator.destroy(result);
@@ -61,7 +62,7 @@ pub fn create(args: struct {
     result.ssl_tunnel = null;
     result.write_mutex = .{};
 
-    result.heartbeat = try Heartbeat.init(result);
+    result.heartbeat = try Heartbeat.init(result, args.heartbeat);
     errdefer result.heartbeat.deinit();
 
     return result;
@@ -227,8 +228,8 @@ pub fn ws(self: *Client, handler: anytype) !void {
 
         reconnect_wait = 1;
 
-        self.heartbeat.mailbox.putOverwrite(.start);
-        defer self.heartbeat.mailbox.putOverwrite(.stop);
+        self.heartbeat.send(.start);
+        defer self.heartbeat.send(.stop);
 
         self.listen(handler) catch |err| switch (err) {
             error.ConnectionReset => continue,
@@ -346,7 +347,7 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
                         el_data,
                     );
                 },
-                .heartbeat_ack => self.heartbeat.mailbox.putOverwrite(.ack),
+                .heartbeat_ack => self.heartbeat.send(.ack),
                 else => {},
             }
             _ = try el_data.finalizeToken();
