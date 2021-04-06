@@ -60,7 +60,10 @@ const ThreadHandler = struct {
         const result = try client.allocator.create(ThreadHandler);
         errdefer client.allocator.destroy(result);
         result.allocator = client.allocator;
-        result.mailbox = .{};
+
+        try result.mailbox.init();
+        errdefer result.mailbox.deinit();
+
         result.thread = try std.Thread.spawn(handler, .{ .ctx = result, .client = client });
         return result;
     }
@@ -69,6 +72,7 @@ const ThreadHandler = struct {
         ctx.mailbox.putOverwrite(.deinit);
         // Reap the thread
         ctx.thread.wait();
+        ctx.mailbox.deinit();
         ctx.allocator.destroy(ctx);
     }
 

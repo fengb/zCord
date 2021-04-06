@@ -7,9 +7,6 @@ const Options = struct {
     fn apply(self: Options, lib: *std.build.LibExeObjStep) void {
         lib.setBuildMode(self.mode);
         lib.setTarget(self.target);
-
-        // AtomicCondition is broken so we use pthreads instead
-        lib.linkSystemLibrary("pthread");
     }
 };
 

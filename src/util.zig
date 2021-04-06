@@ -61,55 +61,53 @@ pub fn ErrorOf(comptime func: anytype) type {
 }
 
 pub fn Mailbox(comptime T: type) type {
-    if (!std.Thread.use_pthreads) {
-        @compileError("zCord currently requires pthreads. Please recompile with -lpthread enabled");
-    }
-
     return struct {
         const Self = @This();
 
-        value: ?T = null,
-        cond: std.Thread.Condition = .{},
-        mutex: std.Thread.Mutex = .{},
+        value: ?T,
+        mutex: std.Thread.Mutex,
+        reset_event: std.Thread.ResetEvent,
+
+        pub fn init(self: *Self) !void {
+            try self.reset_event.init();
+            errdefer self.reset_event.deinit();
+
+            self.value = null;
+            self.mutex = .{};
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.reset_event.deinit();
+        }
 
         pub fn get(self: *Self) T {
+            self.reset_event.wait();
+
             const held = self.mutex.acquire();
             defer held.release();
 
-            if (self.value) |value| {
-                self.value = null;
-                return value;
-            } else {
-                self.cond.wait(&self.mutex);
-
-                defer self.value = null;
-                return self.value.?;
-            }
+            self.reset_event.reset();
+            defer self.value = null;
+            return self.value.?;
         }
 
         pub fn getWithTimeout(self: *Self, timeout_ns: u64) ?T {
+            _ = self.reset_event.timedWait(timeout_ns);
+
             const held = self.mutex.acquire();
             defer held.release();
 
-            if (self.value) |value| {
-                self.value = null;
-                return value;
-            } else {
-                const future_ns = std.time.nanoTimestamp() + timeout_ns;
-                var future: std.os.timespec = undefined;
-                future.tv_sec = @intCast(@TypeOf(future.tv_sec), @divFloor(future_ns, std.time.ns_per_s));
-                future.tv_nsec = @intCast(@TypeOf(future.tv_nsec), @mod(future_ns, std.time.ns_per_s));
-
-                const rc = std.os.system.pthread_cond_timedwait(&self.cond.impl.cond, &self.mutex.impl.pthread_mutex, &future);
-                std.debug.assert(rc == 0 or rc == std.os.system.ETIMEDOUT);
-                defer self.value = null;
-                return self.value;
-            }
+            self.reset_event.reset();
+            defer self.value = null;
+            return self.value;
         }
 
         pub fn putOverwrite(self: *Self, value: T) void {
+            const held = self.mutex.acquire();
+            defer held.release();
+
             self.value = value;
-            self.cond.impl.signal();
+            self.reset_event.set();
         }
     };
 }
