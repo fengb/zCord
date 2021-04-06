@@ -105,7 +105,7 @@ fn connect(self: *Client) !ConnectInfo {
 
     var result: ConnectInfo = undefined;
 
-    var flush_error: util.ErrorOf(self.wz.flushReader)!void = {};
+    var flush_error: WzClient.ReadNextError!void = {};
     {
         var stream = json.stream(self.wz.reader());
         defer self.wz.flushReader() catch |err| {
