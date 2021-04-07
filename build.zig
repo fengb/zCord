@@ -38,7 +38,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
-    for ([_][]const u8{ "print-bot", "reply-bot" }) |name| {
+    for ([_][]const u8{ "print-bot", "reconnect-bot", "reply-bot" }) |name| {
         const exe = createExampleExe(b, name);
         options.apply(exe);
         test_step.dependOn(&exe.step);
