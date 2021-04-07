@@ -196,7 +196,13 @@ const AstNode = struct {
                             .Float, .Int => try json_element.optionalNumber(o_info.child),
                             else => @compileError("Type not supported " ++ @typeName(AtomType)),
                         },
-                        else => @compileError("Type not supported " ++ @typeName(AtomType)),
+                        else => blk: {
+                            if (@hasDecl(AtomType, "consumeJsonElement")) {
+                                break :blk try AtomType.consumeJsonElement(json_element);
+                            } else {
+                                @compileError("Type not supported " ++ @typeName(AtomType));
+                            }
+                        },
                     },
                 };
 
@@ -320,6 +326,48 @@ test "simple match" {
     expectEqual(m.@"foo", true);
     expectEqual(m.@"bar", 2);
     std.testing.expectEqualStrings(m.@"baz", "nop");
+}
+
+test "custom function" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"foo": "banana"}
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    expectEqual(root.kind, .Object);
+
+    const Fruit = enum(u32) {
+        const Self = @This();
+
+        pear,
+        banana,
+        apple,
+        chocolate,
+        _,
+
+        pub fn consumeJsonElement(element: anytype) !Self {
+            var buffer: [0x100]u8 = undefined;
+            const raw = try element.stringBuffer(&buffer);
+            if (std.mem.eql(u8, raw, "pear")) {
+                return Self.pear;
+            } else if (std.mem.eql(u8, raw, "banana")) {
+                return Self.banana;
+            } else if (std.mem.eql(u8, raw, "apple")) {
+                return Self.apple;
+            } else if (std.mem.eql(u8, raw, "chocolate")) {
+                return Self.chocolate;
+            } else {
+                return @intToEnum(Self, 0xAA);
+            }
+        }
+    };
+
+    const m = try match(null, root, struct {
+        @"foo": Fruit,
+    });
+
+    expectEqual(m.@"foo", .banana);
 }
 
 test "nested" {

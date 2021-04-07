@@ -2,6 +2,8 @@ const std = @import("std");
 
 pub fn Fixbuf(comptime max_len: usize) type {
     return struct {
+        const Self = @This();
+
         data: [max_len]u8 = undefined,
         len: usize = 0,
 
@@ -32,6 +34,13 @@ pub fn Fixbuf(comptime max_len: usize) type {
 
         pub fn pop(self: *@This()) !u8 {
             return self.last() orelse error.Empty;
+        }
+
+        pub fn consumeJsonElement(elem: anytype) !Self {
+            var result = Self{};
+            const string = try elem.stringBuffer(&result.data);
+            result.len = string.len;
+            return result;
         }
     };
 }

@@ -169,17 +169,15 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        var buffer: [0x10000]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&buffer);
-        const paths = try json.path.match(&fba.allocator, root, struct {
-            @"t": []const u8,
+        const paths = try json.path.match(null, root, struct {
+            @"t": util.Fixbuf(0x100),
             @"s": ?u32,
             @"op": u8,
-            @"d.session_id": []const u8,
-            @"d.user.id": []const u8,
+            @"d.session_id": util.Fixbuf(0x100),
+            @"d.user.id": discord.Snowflake(.user),
         });
 
-        if (!std.mem.eql(u8, paths.@"t", "READY")) {
+        if (!std.mem.eql(u8, paths.@"t".slice(), "READY")) {
             return error.MalformedIdentify;
         }
         if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.dispatch)) {
@@ -190,8 +188,8 @@ fn connect(self: *Client) !ConnectInfo {
             result.seq = seq;
         }
 
-        result.user_id = try discord.Snowflake(.user).parse(paths.@"d.user.id");
-        result.session_id.copyFrom(paths.@"d.session_id");
+        result.user_id = paths.@"d.user.id";
+        result.session_id = paths.@"d.session_id";
     }
     try flush_error;
 
