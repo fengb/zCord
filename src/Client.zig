@@ -70,7 +70,7 @@ pub fn create(args: struct {
 
 pub fn destroy(self: *Client) void {
     if (self.ssl_tunnel) |ssl_tunnel| {
-        ssl_tunnel.deinit();
+        ssl_tunnel.destroy();
     }
     self.heartbeat.deinit();
     self.allocator.destroy(self);
@@ -82,7 +82,7 @@ pub fn ctx(self: *Client, comptime T: type) *T {
 
 fn connect(self: *Client) !ConnectInfo {
     std.debug.assert(self.ssl_tunnel == null);
-    self.ssl_tunnel = try https.Tunnel.init(.{
+    self.ssl_tunnel = try https.Tunnel.create(.{
         .allocator = self.allocator,
         .host = "gateway.discord.gg",
     });
@@ -198,7 +198,7 @@ fn connect(self: *Client) !ConnectInfo {
 
 fn disconnect(self: *Client) void {
     if (self.ssl_tunnel) |ssl_tunnel| {
-        ssl_tunnel.deinit();
+        ssl_tunnel.destroy();
         self.ssl_tunnel = null;
     }
 }

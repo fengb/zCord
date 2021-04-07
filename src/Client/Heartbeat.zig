@@ -122,7 +122,7 @@ const ThreadHandler = struct {
                     std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
                 }
 
-                std.os.shutdown(args.client.ssl_tunnel.?.tcp_conn.handle, .both) catch |err| {
+                args.client.ssl_tunnel.?.shutdown() catch |err| {
                     std.debug.print("Shutdown failed: {}\n", .{err});
                 };
                 heartbeat_interval_ms = 0;

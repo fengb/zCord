@@ -25,10 +25,11 @@ pub const Tunnel = struct {
 
     client: Client,
     tcp_conn: std.net.Stream,
+    state: enum { connected, shutdown },
 
     pub const Client = iguanaTLS.Client(std.net.Stream.Reader, std.net.Stream.Writer, iguanaTLS.ciphersuites.all, false);
 
-    pub fn init(args: struct {
+    pub fn create(args: struct {
         allocator: *std.mem.Allocator,
         host: []const u8,
         port: u16 = 443,
@@ -60,8 +61,19 @@ pub const Tunnel = struct {
         return result;
     }
 
-    pub fn deinit(self: *Tunnel) void {
-        self.client.close_notify() catch {};
+    pub fn shutdown(self: *Tunnel) !void {
+        std.debug.assert(self.state == .connected);
+
+        const close_err = self.client.close_notify();
+        try std.os.shutdown(self.tcp_conn.handle, .both);
+        self.state = .shutdown;
+        try close_err;
+    }
+
+    pub fn destroy(self: *Tunnel) void {
+        if (self.state == .connected) {
+            self.client.close_notify() catch {};
+        }
         self.tcp_conn.close();
         self.allocator.destroy(self);
     }
@@ -84,13 +96,13 @@ pub const Request = struct {
         user_agent: []const u8 = "zCord/0.0.1",
         pem: ?[]const u8 = null,
     }) !Request {
-        var tunnel = try Tunnel.init(.{
+        var tunnel = try Tunnel.create(.{
             .allocator = args.allocator,
             .host = args.host,
             .port = args.port,
             .pem = args.pem,
         });
-        errdefer tunnel.deinit();
+        errdefer tunnel.destroy();
 
         const buffer = try args.allocator.alloc(u8, 0x1000);
         errdefer args.allocator.free(buffer);
@@ -110,7 +122,7 @@ pub const Request = struct {
     }
 
     pub fn deinit(self: *Request) void {
-        self.tunnel.deinit();
+        self.tunnel.destroy();
         self.allocator.free(self.buffer);
         self.* = undefined;
     }
