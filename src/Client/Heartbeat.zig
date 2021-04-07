@@ -8,7 +8,6 @@ const Heartbeat = @This();
 handler: union(enum) {
     thread: *ThreadHandler,
     callback: CallbackHandler,
-    manual,
 },
 
 pub const Message = enum { start, ack, stop, deinit };
@@ -24,8 +23,15 @@ pub fn init(client: *Client, strategy: Strategy) !Heartbeat {
     return Heartbeat{
         .handler = switch (strategy) {
             .thread => .{ .thread = try ThreadHandler.init(client) },
-            .manual => .manual,
             .callback => |cb| .{ .callback = cb },
+            .manual => .{
+                .callback = .{
+                    .context = undefined,
+                    .func = struct {
+                        fn noop(ctx: *c_void, msg: Message) void {}
+                    }.noop,
+                },
+            },
         },
     };
 }
@@ -34,7 +40,6 @@ pub fn deinit(self: Heartbeat) void {
     switch (self.handler) {
         .thread => |thread| thread.deinit(),
         .callback => |cb| cb.func(cb.context, .deinit),
-        .manual => {},
     }
 }
 
@@ -42,7 +47,6 @@ pub fn send(self: Heartbeat, msg: Message) void {
     switch (self.handler) {
         .thread => |thread| thread.mailbox.putOverwrite(msg),
         .callback => |cb| cb.func(cb.context, msg),
-        .manual => {},
     }
 }
 
