@@ -223,7 +223,7 @@ pub const Gateway = struct {
         afk: bool = false,
     };
 
-    const Activity = struct {
+    pub const Activity = struct {
         type: enum {
             Game = 0,
             Streaming = 1,
