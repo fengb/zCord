@@ -100,7 +100,7 @@ const ThreadHandler = struct {
                     switch (msg) {
                         .start => {},
                         .ack => {
-                            std.debug.print("<< ♥\n", .{});
+                            log.info("<< ♥\n", .{});
                             ack = true;
                         },
                         .stop => heartbeat_interval_ms = 0,
@@ -113,17 +113,17 @@ const ThreadHandler = struct {
                     ack = false;
                     // TODO: actually check this or fix threads + async
                     if (nosuspend args.client.sendCommand(.{ .heartbeat = args.client.connect_info.?.seq })) |_| {
-                        std.debug.print(">> ♡\n", .{});
+                        log.info(">> ♡\n", .{});
                         continue;
                     } else |_| {
-                        std.debug.print("Heartbeat send failed. Reconnecting...\n", .{});
+                        log.info("Heartbeat send failed. Reconnecting...\n", .{});
                     }
                 } else {
-                    std.debug.print("Missed heartbeat. Reconnecting...\n", .{});
+                    log.info("Missed heartbeat. Reconnecting...\n", .{});
                 }
 
                 args.client.ssl_tunnel.?.shutdown() catch |err| {
-                    std.debug.print("Shutdown failed: {}\n", .{err});
+                    log.info("Shutdown failed: {}\n", .{err});
                 };
                 heartbeat_interval_ms = 0;
             }
