@@ -381,24 +381,18 @@ pub fn sendRequest(self: *Client, allocator: *std.mem.Allocator, method: https.R
     try req.client.writeHeaderValue("Authorization", self.auth_token);
 
     switch (@typeInfo(@TypeOf(body))) {
-        .Null => try req.sendEmptyBody(),
+        .Null => _ = try req.sendEmptyBody(),
         .Optional => {
             if (body == null) {
-                try req.sendEmptyBody();
+                _ = try req.sendEmptyBody();
             } else {
-                try req.printSend("{}", .{json.format(body)});
+                _ = try req.sendPrint("{}", .{json.format(body)});
             }
         },
-        else => try req.printSend("{}", .{json.format(body)}),
+        else => _ = try req.sendPrint("{}", .{json.format(body)}),
     }
 
     return req;
-}
-
-pub fn sendMessage(self: *Client, allocator: *std.mem.Allocator, channel_id: discord.Snowflake(.channel), msg: discord.Resource.Message) !https.Request {
-    var buf: [0x100]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id});
-    return self.sendRequest(allocator, .POST, path, msg);
 }
 
 test {

@@ -40,10 +40,13 @@ pub fn main() !void {
             };
 
             if (channel_id != null and msg != null and std.mem.eql(u8, msg.?, "Hello")) {
-                var response = try client.sendMessage(client.allocator, channel_id.?, .{
+                var buf: [0x100]u8 = undefined;
+                const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id.?});
+
+                var req = try client.sendRequest(client.allocator, .POST, path, .{
                     .content = "World",
                 });
-                defer response.deinit();
+                defer req.deinit();
             }
         }
     });

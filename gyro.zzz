@@ -1,4 +1,4 @@
 deps:
-  truemedian/hzzp: ^0.0.2
+  truemedian/hzzp: ^0.0.3
   truemedian/wz: ^0.0.1
   alexnask/iguanaTLS: ^0.0.1

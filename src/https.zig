@@ -84,6 +84,7 @@ pub const Request = struct {
     tunnel: *Tunnel,
     buffer: []u8,
     client: hzzp.base.client.BaseClient(Tunnel.Client.Reader, Tunnel.Client.Writer),
+    response_code: ?hzzp.StatusCode,
 
     pub const Method = enum { GET, POST, PUT, DELETE, PATCH };
 
@@ -108,9 +109,7 @@ pub const Request = struct {
         errdefer args.allocator.free(buffer);
 
         var client = hzzp.base.client.create(buffer, tunnel.client.reader(), tunnel.client.writer());
-
         try client.writeStatusLine(@tagName(args.method), args.path);
-
         try client.writeHeaderValue("Host", args.host);
 
         return Request{
@@ -118,6 +117,7 @@ pub const Request = struct {
             .tunnel = tunnel,
             .buffer = buffer,
             .client = client,
+            .response_code = null,
         };
     }
 
@@ -127,54 +127,49 @@ pub const Request = struct {
         self.* = undefined;
     }
 
+    pub const printSend = @compileError("Deprecated: please switch to `sendPrint(fmt, args)`");
+    pub const expectSuccessStatus = @compileError("Deprecated: please switch to `req.response_code.group() == .success`");
+
     // TODO: fix this name
-    pub fn printSend(self: *Request, comptime fmt: []const u8, args: anytype) !void {
+    pub fn sendPrint(self: *Request, comptime fmt: []const u8, args: anytype) !hzzp.StatusCode {
         try self.client.writeHeaderFormat("Content-Length", "{d}", .{std.fmt.count(fmt, args)});
         try self.client.finishHeaders();
         try self.client.writer.print(fmt, args);
+        return try self.initResponseCode();
     }
 
     // TODO: fix this name
-    pub fn sendEmptyBody(self: *Request) !void {
+    pub fn sendEmptyBody(self: *Request) !hzzp.StatusCode {
         try self.client.finishHeaders();
         try self.client.writePayload(null);
+        return try self.initResponseCode();
     }
 
-    pub fn expectSuccessStatus(self: *Request) !u16 {
-        if (try self.client.next()) |event| {
-            if (event != .status) {
-                return error.MissingStatus;
-            }
-            switch (event.status.code) {
-                200...299 => return event.status.code,
+    fn initResponseCode(self: *Request) !hzzp.StatusCode {
+        if (self.response_code) |code| return code;
 
-                100...199 => return error.MiscInformation,
-
-                300...399 => return error.MiscRedirect,
-
-                400 => return error.BadRequest,
-                401 => return error.Unauthorized,
-                402 => return error.PaymentRequired,
-                403 => return error.Forbidden,
-                404 => return error.NotFound,
-                429 => return error.TooManyRequests,
-                405...428, 430...499 => return error.MiscClientError,
-
-                500 => return error.InternalServerError,
-                501...599 => return error.MiscServerError,
-                else => unreachable,
-            }
-        } else {
-            return error.NoResponse;
+        const event = (try self.client.next()).?;
+        if (event != .status) {
+            return error.MissingStatus;
         }
+        const raw_code = std.math.cast(u10, event.status.code) catch 666;
+        self.response_code = @intToEnum(hzzp.StatusCode, raw_code);
+        return self.response_code.?;
     }
 
     pub fn completeHeaders(self: *Request) !void {
+        _ = try self.initResponseCode();
         while (try self.client.next()) |event| {
             if (event == .head_done) {
                 return;
             }
         }
+    }
+
+    pub fn debugDumpResponse(self: *Request, writer: anytype) !void {
+        try self.initResponseCode();
+        try self.debugDumpHeaders(writer);
+        try self.debugDumpBody(writer);
     }
 
     pub fn debugDumpHeaders(self: *Request, writer: anytype) !void {
