@@ -111,6 +111,7 @@ pub const Request = struct {
         var client = hzzp.base.client.create(buffer, tunnel.client.reader(), tunnel.client.writer());
         try client.writeStatusLine(@tagName(args.method), args.path);
         try client.writeHeaderValue("Host", args.host);
+        try client.writeHeaderValue("User-Agent", args.user_agent);
 
         return Request{
             .allocator = args.allocator,
