@@ -109,11 +109,6 @@ pub const Gateway = struct {
     };
 
     pub const Command = union(Opcode) {
-        // TODO: remove this once nested literals work better
-        pub fn identify(data: std.meta.fieldInfo(Command, .identify).field_type) Command {
-            return .{ .identify = data };
-        }
-
         dispatch: void,
         reconnect: void,
         invalid_session: void,
