@@ -80,11 +80,43 @@ pub fn ctx(self: *Client, comptime T: type) *T {
     return @ptrCast(*T, @alignCast(@alignOf(T), self.context.?));
 }
 
+fn fetchGatewayHost(self: *Client, buffer: []u8) ![]const u8 {
+    var req = try self.sendRequest(self.allocator, .GET, "/api/v8/gateway/bot", null);
+    defer req.deinit();
+
+    switch (req.response_code.?) {
+        .success_ok => {},
+        .client_unauthorized => return error.AuthenticationFailed,
+        else => {
+            log.warn("Unknown response code: {}", .{req.response_code.?});
+            return error.UnknownGatewayResponse;
+        },
+    }
+
+    try req.completeHeaders();
+
+    var stream = json.stream(req.client.reader());
+
+    const root = try stream.root();
+    const match = (try root.objectMatchOne("url")) orelse return error.UnknownGatewayResponse;
+    const url = try match.value.stringBuffer(buffer);
+    if (std.mem.startsWith(u8, url, "wss://")) {
+        return url["wss://".len..];
+    } else {
+        log.warn("Unknown url: {s}", .{url});
+        return error.UnknownGatewayResponse;
+    }
+}
+
 fn connect(self: *Client) !ConnectInfo {
     std.debug.assert(self.ssl_tunnel == null);
+
+    var buf: [0x100]u8 = undefined;
+    const host = try self.fetchGatewayHost(&buf);
+
     self.ssl_tunnel = try https.Tunnel.create(.{
         .allocator = self.allocator,
-        .host = "gateway.discord.gg",
+        .host = host,
     });
     errdefer self.disconnect();
 
@@ -368,7 +400,7 @@ pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
 
 pub fn sendRequest(self: *Client, allocator: *std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
     var req = try https.Request.init(.{
-        .allocator = self.allocator,
+        .allocator = allocator,
         .host = "discord.com",
         .method = method,
         .path = path,
