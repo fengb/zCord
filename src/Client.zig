@@ -263,10 +263,14 @@ pub fn ws(self: *Client, handler: anytype) !void {
 
         self.listen(handler) catch |err| switch (err) {
             error.ConnectionReset => continue,
+            error.InvalidSession => {
+                self.connect_info = null;
+                continue;
+            },
             else => |e| {
                 // TODO: convert this to inline switch once available
-                if (!util.errSetContains(WzClient.ReadNextError, err)) {
-                    return err;
+                if (!util.errSetContains(WzClient.ReadNextError, e)) {
+                    return e;
                 }
             },
         };
@@ -329,8 +333,11 @@ fn listen(self: *Client, handler: anytype) !void {
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
             .Text => {
-                self.processChunks(self.wz.reader(), handler) catch |err| {
-                    log.info("Process chunks failed: {s}", .{err});
+                self.processChunks(self.wz.reader(), handler) catch |err| switch (err) {
+                    error.ConnectionReset, error.InvalidSession => |e| return e,
+                    else => {
+                        log.warn("Process chunks failed: {s}", .{err});
+                    },
                 };
                 try self.wz.flushReader();
             },
@@ -347,7 +354,11 @@ fn listen(self: *Client, handler: anytype) !void {
 
 fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
     var stream = json.stream(reader);
-    errdefer |err| log.info("{}", .{stream.debugInfo()});
+    errdefer |err| {
+        if (util.errSetContains(@TypeOf(stream).ParseError, err)) {
+            log.warn("{}", .{stream.debugInfo()});
+        }
+    }
 
     var name_buf: [32]u8 = undefined;
     var name: ?[]u8 = null;
@@ -378,6 +389,15 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
                     );
                 },
                 .heartbeat_ack => self.heartbeat.send(.ack),
+                .invalid_session => {
+                    log.info("Websocket invalid session. Reconnecting...", .{});
+                    const resumable = el_data.boolean() catch false;
+                    if (resumable) {
+                        return error.ConnectionReset;
+                    } else {
+                        return error.InvalidSession;
+                    }
+                },
                 else => {},
             }
             _ = try el_data.finalizeToken();

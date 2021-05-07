@@ -59,7 +59,8 @@ pub fn Stream(comptime Reader: type) type {
 
         const ElementType = enum { Object, Array, String, Number, Boolean, Null };
 
-        const Error = Reader.Error || json_std.StreamingParser.Error || error{
+        pub const Error = Reader.Error || ParseError;
+        pub const ParseError = json_std.StreamingParser.Error || error{
             WrongElementType,
             UnexpectedEndOfJson,
         };

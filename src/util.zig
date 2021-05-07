@@ -47,7 +47,7 @@ pub fn Fixbuf(comptime max_len: usize) type {
 
 pub fn errSetContains(comptime ErrorSet: type, err: anytype) bool {
     inline for (comptime std.meta.fields(ErrorSet)) |e| {
-        if (err == @field(ErrorSet, e.name)) {
+        if (@as(anyerror, err) == @field(ErrorSet, e.name)) {
             return true;
         }
     }
