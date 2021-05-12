@@ -79,22 +79,22 @@ const PathToken = union(enum) {
 
 test "PathToken" {
     var iter = PathToken.tokenize("foo.bar.baz");
-    std.testing.expectEqualStrings("foo", (try iter.next()).?.key);
-    std.testing.expectEqualStrings("bar", (try iter.next()).?.key);
-    std.testing.expectEqualStrings("baz", (try iter.next()).?.key);
-    std.testing.expectEqual(@as(?PathToken, null), try iter.next());
+    try std.testing.expectEqualStrings("foo", (try iter.next()).?.key);
+    try std.testing.expectEqualStrings("bar", (try iter.next()).?.key);
+    try std.testing.expectEqualStrings("baz", (try iter.next()).?.key);
+    try std.testing.expectEqual(@as(?PathToken, null), try iter.next());
 
     iter = PathToken.tokenize("[1][2][3]");
-    std.testing.expectEqual(@as(u32, 1), (try iter.next()).?.index);
-    std.testing.expectEqual(@as(u32, 2), (try iter.next()).?.index);
-    std.testing.expectEqual(@as(u32, 3), (try iter.next()).?.index);
-    std.testing.expectEqual(@as(?PathToken, null), try iter.next());
+    try std.testing.expectEqual(@as(u32, 1), (try iter.next()).?.index);
+    try std.testing.expectEqual(@as(u32, 2), (try iter.next()).?.index);
+    try std.testing.expectEqual(@as(u32, 3), (try iter.next()).?.index);
+    try std.testing.expectEqual(@as(?PathToken, null), try iter.next());
 
     iter = PathToken.tokenize("['foo']['bar']['baz']");
-    std.testing.expectEqualStrings("foo", (try iter.next()).?.key);
-    std.testing.expectEqualStrings("bar", (try iter.next()).?.key);
-    std.testing.expectEqualStrings("baz", (try iter.next()).?.key);
-    std.testing.expectEqual(@as(?PathToken, null), try iter.next());
+    try std.testing.expectEqualStrings("foo", (try iter.next()).?.key);
+    try std.testing.expectEqualStrings("bar", (try iter.next()).?.key);
+    try std.testing.expectEqualStrings("baz", (try iter.next()).?.key);
+    try std.testing.expectEqual(@as(?PathToken, null), try iter.next());
 }
 
 const AstNode = struct {
@@ -314,7 +314,7 @@ test "simple match" {
     var str = json.stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     const m = try match(std.testing.allocator, root, struct {
         @"foo": bool,
@@ -323,9 +323,9 @@ test "simple match" {
     });
     defer freeMatch(std.testing.allocator, m);
 
-    expectEqual(m.@"foo", true);
-    expectEqual(m.@"bar", 2);
-    std.testing.expectEqualStrings(m.@"baz", "nop");
+    try expectEqual(m.@"foo", true);
+    try expectEqual(m.@"bar", 2);
+    try std.testing.expectEqualStrings(m.@"baz", "nop");
 }
 
 test "custom function" {
@@ -335,7 +335,7 @@ test "custom function" {
     var str = json.stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     const Fruit = enum(u32) {
         const Self = @This();
@@ -367,7 +367,7 @@ test "custom function" {
         @"foo": Fruit,
     });
 
-    expectEqual(m.@"foo", .banana);
+    try expectEqual(m.@"foo", .banana);
 }
 
 test "nested" {
@@ -377,19 +377,19 @@ test "nested" {
     var str = json.stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     const m = try match(std.testing.allocator, root, struct {
         @"nest.foo": u32,
         @"nest.bar": bool,
     });
 
-    expectEqual(m.@"nest.foo", 1);
-    expectEqual(m.@"nest.bar", false);
+    try expectEqual(m.@"nest.foo", 1);
+    try expectEqual(m.@"nest.bar", false);
 }
 
-fn expectEqual(actual: anytype, expected: @TypeOf(actual)) void {
-    std.testing.expectEqual(expected, actual);
+fn expectEqual(actual: anytype, expected: @TypeOf(actual)) !void {
+    try std.testing.expectEqual(expected, actual);
 }
 
 test "optionals" {
@@ -397,7 +397,7 @@ test "optionals" {
     var str = json.stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     const m = try match(std.testing.allocator, root, struct {
         @"foo": ?bool,
@@ -406,9 +406,9 @@ test "optionals" {
     });
     defer freeMatch(std.testing.allocator, m);
 
-    expectEqual(m.@"foo", null);
-    expectEqual(m.@"bar", null);
-    expectEqual(m.@"baz", null);
+    try expectEqual(m.@"foo", null);
+    try expectEqual(m.@"bar", null);
+    try expectEqual(m.@"baz", null);
 }
 
 test "requireds" {
@@ -416,9 +416,9 @@ test "requireds" {
     var str = json.stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
-    std.testing.expectError(error.Required, match(std.testing.allocator, root, struct {
+    try std.testing.expectError(error.Required, match(std.testing.allocator, root, struct {
         @"foo": bool,
         @"bar": u32,
         @"baz": []const u8,

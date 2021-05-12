@@ -621,8 +621,8 @@ pub fn Stream(comptime Reader: type) type {
     };
 }
 
-fn expectEqual(actual: anytype, expected: ExpectedType(@TypeOf(actual))) void {
-    std.testing.expectEqual(expected, actual);
+fn expectEqual(actual: anytype, expected: ExpectedType(@TypeOf(actual))) !void {
+    try std.testing.expectEqual(expected, actual);
 }
 
 fn ExpectedType(comptime ActualType: type) type {
@@ -639,8 +639,8 @@ test "boolean" {
 
     const root = try str.root();
     const element = (try root.arrayNext()).?;
-    expectEqual(element.kind, .Boolean);
-    expectEqual(try element.boolean(), true);
+    try expectEqual(element.kind, .Boolean);
+    try expectEqual(try element.boolean(), true);
 }
 
 test "null" {
@@ -649,8 +649,8 @@ test "null" {
 
     const root = try str.root();
     const element = (try root.arrayNext()).?;
-    expectEqual(element.kind, .Null);
-    expectEqual(try element.optionalBoolean(), null);
+    try expectEqual(element.kind, .Null);
+    try expectEqual(try element.optionalBoolean(), null);
 }
 
 test "integer" {
@@ -660,8 +660,8 @@ test "integer" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(u8), 1);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(u8), 1);
     }
     {
         // Technically invalid, but we don't str far enough to find out
@@ -670,8 +670,8 @@ test "integer" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(u8), 123);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(u8), 123);
     }
     {
         var fbs = std.io.fixedBufferStream("[-128]");
@@ -679,8 +679,8 @@ test "integer" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(i8), -128);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(i8), -128);
     }
     {
         var fbs = std.io.fixedBufferStream("[456]");
@@ -688,8 +688,8 @@ test "integer" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(element.number(u8), error.Overflow);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(element.number(u8), error.Overflow);
     }
 }
 
@@ -700,8 +700,8 @@ test "float" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(f32), 1.125);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(f32), 1.125);
     }
     {
         // Technically invalid, but we don't str far enough to find out
@@ -710,8 +710,8 @@ test "float" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(f64), 2.5);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(f64), 2.5);
     }
     {
         var fbs = std.io.fixedBufferStream("[-1]");
@@ -719,8 +719,8 @@ test "float" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(try element.number(f64), -1);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(try element.number(f64), -1);
     }
     {
         var fbs = std.io.fixedBufferStream("[1e64]");
@@ -728,8 +728,8 @@ test "float" {
 
         const root = try str.root();
         const element = (try root.arrayNext()).?;
-        expectEqual(element.kind, .Number);
-        expectEqual(element.number(f64), 1e64);
+        try expectEqual(element.kind, .Number);
+        try expectEqual(element.number(f64), 1e64);
     }
 }
 
@@ -741,9 +741,9 @@ test "string" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("hello world", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("hello world", try element.stringBuffer(&buffer));
     }
 }
 
@@ -755,9 +755,9 @@ test "string escapes" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("hello\nworld\t", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("hello\nworld\t", try element.stringBuffer(&buffer));
     }
 }
 
@@ -769,9 +769,9 @@ test "string unicode escape" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("$", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("$", try element.stringBuffer(&buffer));
     }
     {
         var fbs = std.io.fixedBufferStream(
@@ -780,9 +780,9 @@ test "string unicode escape" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("¢", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("¢", try element.stringBuffer(&buffer));
     }
     {
         var fbs = std.io.fixedBufferStream(
@@ -791,9 +791,9 @@ test "string unicode escape" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("ह", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("ह", try element.stringBuffer(&buffer));
     }
     {
         var fbs = std.io.fixedBufferStream(
@@ -802,9 +802,9 @@ test "string unicode escape" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("€", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("€", try element.stringBuffer(&buffer));
     }
     {
         var fbs = std.io.fixedBufferStream(
@@ -813,9 +813,9 @@ test "string unicode escape" {
         var str = stream(fbs.reader());
 
         const element = try str.root();
-        expectEqual(element.kind, .String);
+        try expectEqual(element.kind, .String);
         var buffer: [100]u8 = undefined;
-        std.testing.expectEqualStrings("한", try element.stringBuffer(&buffer));
+        try std.testing.expectEqualStrings("한", try element.stringBuffer(&buffer));
     }
 }
 
@@ -824,9 +824,9 @@ test "empty array" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Array);
+    try expectEqual(root.kind, .Array);
 
-    expectEqual(try root.arrayNext(), null);
+    try expectEqual(try root.arrayNext(), null);
 }
 
 test "array of simple values" {
@@ -834,29 +834,29 @@ test "array of simple values" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Array);
+    try expectEqual(root.kind, .Array);
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Boolean);
-        expectEqual(try item.boolean(), false);
+        try expectEqual(item.kind, .Boolean);
+        try expectEqual(try item.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Boolean);
-        expectEqual(try item.boolean(), true);
+        try expectEqual(item.kind, .Boolean);
+        try expectEqual(try item.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Null);
-        expectEqual(try item.optionalBoolean(), null);
+        try expectEqual(item.kind, .Null);
+        try expectEqual(try item.optionalBoolean(), null);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
-    expectEqual(try root.arrayNext(), null);
+    try expectEqual(try root.arrayNext(), null);
 }
 
 test "array of numbers" {
@@ -864,30 +864,30 @@ test "array of numbers" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Array);
+    try expectEqual(root.kind, .Array);
 
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Number);
-        expectEqual(try item.number(u8), 1);
+        try expectEqual(item.kind, .Number);
+        try expectEqual(try item.number(u8), 1);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Number);
-        expectEqual(try item.number(u8), 2);
+        try expectEqual(item.kind, .Number);
+        try expectEqual(try item.number(u8), 2);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
-        expectEqual(item.kind, .Number);
-        expectEqual(try item.number(i8), -3);
+        try expectEqual(item.kind, .Number);
+        try expectEqual(try item.number(i8), -3);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
-    expectEqual(try root.arrayNext(), null);
+    try expectEqual(try root.arrayNext(), null);
 }
 
 test "array of strings" {
@@ -897,25 +897,25 @@ test "array of strings" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Array);
+    try expectEqual(root.kind, .Array);
 
     if (try root.arrayNext()) |item| {
         var buffer: [100]u8 = undefined;
-        expectEqual(item.kind, .String);
-        std.testing.expectEqualSlices(u8, "hello", try item.stringBuffer(&buffer));
+        try expectEqual(item.kind, .String);
+        try std.testing.expectEqualSlices(u8, "hello", try item.stringBuffer(&buffer));
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.arrayNext()) |item| {
         var buffer: [100]u8 = undefined;
-        expectEqual(item.kind, .String);
-        std.testing.expectEqualSlices(u8, "world", try item.stringBuffer(&buffer));
+        try expectEqual(item.kind, .String);
+        try std.testing.expectEqualSlices(u8, "world", try item.stringBuffer(&buffer));
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
-    expectEqual(try root.arrayNext(), null);
+    try expectEqual(try root.arrayNext(), null);
 }
 
 test "array early finalize" {
@@ -949,9 +949,9 @@ test "empty object" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
-    expectEqual(try root.objectMatchOne(""), null);
+    try expectEqual(try root.objectMatchOne(""), null);
 }
 
 test "object match" {
@@ -961,22 +961,22 @@ test "object match" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     if (try root.objectMatchOne("foo")) |match| {
-        std.testing.expectEqualSlices(u8, "foo", match.key);
+        try std.testing.expectEqualSlices(u8, "foo", match.key);
         var buffer: [100]u8 = undefined;
-        expectEqual(match.value.kind, .Boolean);
-        expectEqual(try match.value.boolean(), true);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.objectMatchOne("bar")) |match| {
-        std.testing.expectEqualSlices(u8, "bar", match.key);
+        try std.testing.expectEqualSlices(u8, "bar", match.key);
         var buffer: [100]u8 = undefined;
-        expectEqual(match.value.kind, .Boolean);
-        expectEqual(try match.value.boolean(), false);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
@@ -989,22 +989,22 @@ test "object match any" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     if (try root.objectMatchAny(&[_][]const u8{ "foobar", "foo" })) |match| {
-        std.testing.expectEqualSlices(u8, "foo", match.key);
+        try std.testing.expectEqualSlices(u8, "foo", match.key);
         var buffer: [100]u8 = undefined;
-        expectEqual(match.value.kind, .Boolean);
-        expectEqual(try match.value.boolean(), true);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.objectMatchAny(&[_][]const u8{ "foo", "foobar" })) |match| {
-        std.testing.expectEqualSlices(u8, "foobar", match.key);
+        try std.testing.expectEqualSlices(u8, "foobar", match.key);
         var buffer: [100]u8 = undefined;
-        expectEqual(match.value.kind, .Boolean);
-        expectEqual(try match.value.boolean(), false);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
@@ -1017,18 +1017,18 @@ test "object match union" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
     if (try root.objectMatch(enum { foobar, foo })) |match| {
-        expectEqual(match.foo.kind, .Boolean);
-        expectEqual(try match.foo.boolean(), true);
+        try expectEqual(match.foo.kind, .Boolean);
+        try expectEqual(try match.foo.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.objectMatch(enum { foo, foobar })) |match| {
-        expectEqual(match.foobar.kind, .Boolean);
-        expectEqual(try match.foobar.boolean(), false);
+        try expectEqual(match.foobar.kind, .Boolean);
+        try expectEqual(try match.foobar.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
@@ -1041,9 +1041,9 @@ test "object match not found" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
-    expectEqual(try root.objectMatchOne("???"), null);
+    try expectEqual(try root.objectMatchOne("???"), null);
 }
 
 fn expectElement(e: anytype) Stream(std.io.FixedBufferStream([]const u8).Reader).Error!void {
@@ -1083,14 +1083,14 @@ test "finalizeToken on object" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Object);
+    try expectEqual(root.kind, .Object);
 
-    expectEqual(try root.finalizeToken(), .ObjectEnd);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), .ObjectEnd);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
 }
 
 test "finalizeToken on string" {
@@ -1100,14 +1100,14 @@ test "finalizeToken on string" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .String);
+    try expectEqual(root.kind, .String);
 
-    std.testing.expect((try root.finalizeToken()).? == .String);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
-    expectEqual(try root.finalizeToken(), null);
+    try std.testing.expect((try root.finalizeToken()).? == .String);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
+    try expectEqual(try root.finalizeToken(), null);
 }
 
 test "finalizeToken on number" {
@@ -1115,25 +1115,25 @@ test "finalizeToken on number" {
     var str = stream(fbs.reader());
 
     const root = try str.root();
-    expectEqual(root.kind, .Array);
+    try expectEqual(root.kind, .Array);
 
     const inner = (try root.arrayNext()).?;
-    expectEqual(inner.kind, .Array);
+    try expectEqual(inner.kind, .Array);
 
     const first = (try inner.arrayNext()).?;
-    expectEqual(first.kind, .Number);
-    std.testing.expect((try first.finalizeToken()).? == .Number);
-    expectEqual(try first.finalizeToken(), null);
-    expectEqual(try first.finalizeToken(), null);
-    expectEqual(try first.finalizeToken(), null);
-    expectEqual(try first.finalizeToken(), null);
+    try expectEqual(first.kind, .Number);
+    try std.testing.expect((try first.finalizeToken()).? == .Number);
+    try expectEqual(try first.finalizeToken(), null);
+    try expectEqual(try first.finalizeToken(), null);
+    try expectEqual(try first.finalizeToken(), null);
+    try expectEqual(try first.finalizeToken(), null);
 
     const second = (try inner.arrayNext()).?;
-    expectEqual(second.kind, .Number);
-    std.testing.expect((try second.finalizeToken()).? == .Number);
-    expectEqual(try second.finalizeToken(), null);
-    expectEqual(try second.finalizeToken(), null);
-    expectEqual(try second.finalizeToken(), null);
+    try expectEqual(second.kind, .Number);
+    try std.testing.expect((try second.finalizeToken()).? == .Number);
+    try expectEqual(try second.finalizeToken(), null);
+    try expectEqual(try second.finalizeToken(), null);
+    try expectEqual(try second.finalizeToken(), null);
 }
 
 test {
