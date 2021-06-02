@@ -128,7 +128,7 @@ fn connect(self: *Client) !ConnectInfo {
 
     // Handshake
     try self.wz.handshakeStart("/?v=6&encoding=json");
-    try self.wz.handshakeAddHeaderValue("Host", "gateway.discord.gg");
+    try self.wz.handshakeAddHeaderValue("Host", host);
     try self.wz.handshakeFinish();
 
     if (try self.wz.next()) |event| {
@@ -389,8 +389,12 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
                     );
                 },
                 .heartbeat_ack => self.heartbeat.send(.ack),
+                .reconnect => {
+                    log.info("Discord reconnect. Reconnecting...", .{});
+                    return error.ConnectionReset;
+                },
                 .invalid_session => {
-                    log.info("Websocket invalid session. Reconnecting...", .{});
+                    log.info("Discord invalid session. Reconnecting...", .{});
                     const resumable = el_data.boolean() catch false;
                     if (resumable) {
                         return error.ConnectionReset;
@@ -398,7 +402,10 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
                         return error.InvalidSession;
                     }
                 },
-                else => {},
+                else => {
+                    log.info("Unhandled {} -- {s}", .{ op, name });
+                    el_data.debugDump(std.io.getStdErr().writer()) catch {};
+                },
             }
             _ = try el_data.finalizeToken();
         },
