@@ -1,5 +1,4 @@
 const std = @import("std");
-const json_std = @import("json/std.zig");
 pub const path = @import("json/path.zig");
 
 const log = std.log.scoped(.zCord);
@@ -23,7 +22,7 @@ pub fn format(data: anytype) Formatter(@TypeOf(data)) {
 pub fn stream(reader: anytype) Stream(@TypeOf(reader)) {
     return .{
         .reader = reader,
-        .parser = json_std.StreamingParser.init(),
+        .parser = std.json.StreamingParser.init(),
 
         .element_number = 0,
         .parse_failure = null,
@@ -41,7 +40,7 @@ pub fn Stream(comptime Reader: type) type {
         const Self = @This();
 
         reader: Reader,
-        parser: json_std.StreamingParser,
+        parser: std.json.StreamingParser,
 
         element_number: usize,
         parse_failure: ?ParseFailure,
@@ -60,7 +59,7 @@ pub fn Stream(comptime Reader: type) type {
         const ElementType = enum { Object, Array, String, Number, Boolean, Null };
 
         pub const Error = Reader.Error || ParseError;
-        pub const ParseError = json_std.StreamingParser.Error || error{
+        pub const ParseError = std.json.StreamingParser.Error || error{
             WrongElementType,
             UnexpectedEndOfJson,
         };
@@ -455,7 +454,7 @@ pub fn Stream(comptime Reader: type) type {
                     element: Element,
                     writer: @TypeOf(writer),
 
-                    pub fn feed(s: @This(), byte: u8) !?json_std.Token {
+                    pub fn feed(s: @This(), byte: u8) !?std.json.Token {
                         try s.writer.writeByte(byte);
                         return try s.element.ctx.feed(byte);
                     }
@@ -463,11 +462,11 @@ pub fn Stream(comptime Reader: type) type {
                 _ = try self.finalizeTokenWithCustomFeeder(Context{ .element = self, .writer = writer });
             }
 
-            pub fn finalizeToken(self: Element) Error!?json_std.Token {
+            pub fn finalizeToken(self: Element) Error!?std.json.Token {
                 return self.finalizeTokenWithCustomFeeder(self.ctx);
             }
 
-            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?json_std.Token {
+            fn finalizeTokenWithCustomFeeder(self: Element, feeder: anytype) !?std.json.Token {
                 switch (self.kind) {
                     .Boolean, .Null, .Number, .String => {
                         self.ctx.assert(self.element_number == self.ctx.element_number);
@@ -527,7 +526,11 @@ pub fn Stream(comptime Reader: type) type {
             return self._root.?;
         }
 
-        fn assertState(ctx: *Self, valids: []const json_std.StreamingParser.State) void {
+        pub fn format(ctx: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            return writer.print("{s}{{ [TODO: add useful body] }}", .{@typeName(Self)});
+        }
+
+        fn assertState(ctx: *Self, valids: []const std.json.StreamingParser.State) void {
             for (valids) |valid| {
                 if (ctx.parser.state == valid) {
                     return;
@@ -612,9 +615,9 @@ pub fn Stream(comptime Reader: type) type {
 
         // A simpler feed() to enable one liners.
         // token2 can only be close object/array and we don't need it
-        fn feed(ctx: *Self, byte: u8) !?json_std.Token {
-            var token1: ?json_std.Token = undefined;
-            var token2: ?json_std.Token = undefined;
+        fn feed(ctx: *Self, byte: u8) !?std.json.Token {
+            var token1: ?std.json.Token = undefined;
+            var token2: ?std.json.Token = undefined;
             try ctx.parser.feed(byte, &token1, &token2);
             return token1;
         }
