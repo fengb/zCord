@@ -33,7 +33,11 @@ pub fn Fixbuf(comptime max_len: usize) type {
         }
 
         pub fn pop(self: *@This()) !u8 {
-            return self.last() orelse error.Empty;
+            if (self.last()) |c| {
+                self.len -= 1;
+                return c;
+            }
+            return error.Empty;
         }
 
         pub fn consumeJsonElement(elem: anytype) !Self {
