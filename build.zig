@@ -1,4 +1,5 @@
 const std = @import("std");
+const deps = @import("deps.zig");
 
 const Options = struct {
     mode: std.builtin.Mode,
@@ -24,17 +25,13 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     const lib = b.addStaticLibrary("zCord", "src/main.zig");
+    deps.pkgs.addAllTo(lib);
     lib.install();
     options.apply(lib);
-    for (packages.all) |pkg| {
-        lib.addPackage(pkg);
-    }
 
     const main_tests = b.addTest("src/main.zig");
     options.apply(main_tests);
-    for (packages.all) |pkg| {
-        main_tests.addPackage(pkg);
-    }
+    deps.pkgs.addAllTo(main_tests);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
@@ -55,29 +52,7 @@ pub fn build(b: *std.build.Builder) void {
 fn createExampleExe(b: *std.build.Builder, name: []const u8) *std.build.LibExeObjStep {
     const filename = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch unreachable;
     const exe = b.addExecutable(name, filename);
-    exe.addPackage(.{
-        .name = "zCord",
-        .path = "src/main.zig",
-        .dependencies = packages.all,
-    });
+    exe.addPackage(deps.exports.zCord);
 
     return exe;
 }
-
-const packages = struct {
-    const iguanaTLS = std.build.Pkg{
-        .name = "iguanaTLS",
-        .path = "lib/iguanaTLS/src/main.zig",
-    };
-    const hzzp = std.build.Pkg{
-        .name = "hzzp",
-        .path = "lib/hzzp/src/main.zig",
-    };
-    const wz = std.build.Pkg{
-        .name = "wz",
-        .path = "lib/wz/src/main.zig",
-        .dependencies = &[_]std.build.Pkg{hzzp},
-    };
-
-    const all = &[_]std.build.Pkg{ iguanaTLS, hzzp, wz };
-};

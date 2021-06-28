@@ -1,5 +1,22 @@
+pkgs:
+  zCord:
+    version: 0.0.0
+    description: Zig ⚡ Discord API with zero allocations in the critical path
+    license: MIT
+    source_url: "https://github.com/fengb/zCord"
+    root: src/main.zig
+    files:
+      LICENSE
+      README.md
+      cacert.pem
+      build.zig
+      examples/*.zig
+      src/*.zig
+      src/Client/*.zig
+      src/json/*.zig
+
 deps:
-  truemedian/hzzp: ^0.0.3
+  truemedian/hzzp: ^0.1.2
   truemedian/wz: ^0.0.1
   iguanaTLS:
     src:
