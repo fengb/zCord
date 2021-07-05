@@ -18,14 +18,17 @@ pub fn main() !void {
     });
     defer c.destroy();
 
-    const thread = std.Thread.spawn(chaosMonkey, c);
+    _ = try std.Thread.spawn(chaosMonkey, c);
 
     try c.ws(struct {
         pub fn handleConnect(_: *zCord.Client, info: zCord.Client.ConnectInfo) void {
             std.debug.print("Connected as {}\n", .{info.user_id});
         }
 
-        pub fn handleDispatch(_: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {}
+        pub fn handleDispatch(_: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {
+            _ = name;
+            _ = data;
+        }
     });
 }
 

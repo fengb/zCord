@@ -28,7 +28,10 @@ pub fn init(client: *Client, strategy: Strategy) !Heartbeat {
                 .callback = .{
                     .context = undefined,
                     .func = struct {
-                        fn noop(ctx: *c_void, msg: Message) void {}
+                        fn noop(ctx: *c_void, msg: Message) void {
+                            _ = ctx;
+                            _ = msg;
+                        }
                     }.noop,
                 },
             },

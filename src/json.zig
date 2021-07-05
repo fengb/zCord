@@ -9,6 +9,8 @@ pub fn Formatter(comptime T: type) type {
         data: T,
 
         pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
             // TODO: convert stringify options
             return std.json.stringify(self.data, .{ .string = .{ .String = .{} } }, writer);
         }
@@ -527,6 +529,9 @@ pub fn Stream(comptime Reader: type) type {
         }
 
         pub fn format(ctx: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = ctx;
+            _ = fmt;
+            _ = options;
             return writer.print("{s}{{ [TODO: add useful body] }}", .{@typeName(Self)});
         }
 
@@ -558,6 +563,8 @@ pub fn Stream(comptime Reader: type) type {
             ctx: *Self,
 
             pub fn format(self: DebugInfo, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                _ = fmt;
+                _ = options;
                 if (debug_buffer) {
                     if (self.ctx._debug_cursor == null) {
                         self.ctx._debug_cursor = 0;
@@ -573,7 +580,7 @@ pub fn Stream(comptime Reader: type) type {
                                 },
                                 else => {},
                             }
-                        } else |err| {}
+                        } else |_| {}
                     }
 
                     var copy = self.ctx._debug_buffer;
@@ -968,7 +975,6 @@ test "object match" {
 
     if (try root.objectMatchOne("foo")) |match| {
         try std.testing.expectEqualSlices(u8, "foo", match.key);
-        var buffer: [100]u8 = undefined;
         try expectEqual(match.value.kind, .Boolean);
         try expectEqual(try match.value.boolean(), true);
     } else {
@@ -977,7 +983,6 @@ test "object match" {
 
     if (try root.objectMatchOne("bar")) |match| {
         try std.testing.expectEqualSlices(u8, "bar", match.key);
-        var buffer: [100]u8 = undefined;
         try expectEqual(match.value.kind, .Boolean);
         try expectEqual(try match.value.boolean(), false);
     } else {
@@ -996,7 +1001,6 @@ test "object match any" {
 
     if (try root.objectMatchAny(&[_][]const u8{ "foobar", "foo" })) |match| {
         try std.testing.expectEqualSlices(u8, "foo", match.key);
-        var buffer: [100]u8 = undefined;
         try expectEqual(match.value.kind, .Boolean);
         try expectEqual(try match.value.boolean(), true);
     } else {
@@ -1005,7 +1009,6 @@ test "object match any" {
 
     if (try root.objectMatchAny(&[_][]const u8{ "foo", "foobar" })) |match| {
         try std.testing.expectEqualSlices(u8, "foobar", match.key);
-        var buffer: [100]u8 = undefined;
         try expectEqual(match.value.kind, .Boolean);
         try expectEqual(try match.value.boolean(), false);
     } else {

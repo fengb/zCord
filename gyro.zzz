@@ -16,8 +16,8 @@ pkgs:
       src/json/*.zig
 
 deps:
-  truemedian/hzzp: ^0.1.2
-  truemedian/wz: ^0.0.1
+  truemedian/hzzp: ^0.1.3
+  truemedian/wz: ^0.0.2
   iguanaTLS:
     src:
       github:

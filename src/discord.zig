@@ -8,6 +8,8 @@ const std = @import("std");
 /// overflows in some languages. See Gateway ETF/JSON for more information
 /// regarding Gateway encoding.
 pub fn Snowflake(comptime scope: @Type(.EnumLiteral)) type {
+    _ = scope;
+
     return enum(u64) {
         _,
 
@@ -38,17 +40,20 @@ pub fn Snowflake(comptime scope: @Type(.EnumLiteral)) type {
         }
 
         pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
             try writer.print("{}", .{@enumToInt(self)});
         }
 
         pub fn jsonStringify(self: Self, options: std.json.StringifyOptions, writer: anytype) !void {
+          _ = options;
             try writer.print("\"{}\"", .{@enumToInt(self)});
         }
     };
 }
 
 pub const Gateway = struct {
-    pub const Opcode = enum {
+    pub const Opcode = enum(u4) {
         /// An event was dispatched.
         dispatch = 0,
         /// Fired periodically by the client to keep the connection alive.
@@ -189,10 +194,11 @@ pub const Gateway = struct {
         }
 
         pub fn fromRaw(raw: u16) Intents {
-            return @bitCast(Intents, self);
+            return @bitCast(Intents, raw);
         }
 
         pub fn jsonStringify(self: Intents, options: std.json.StringifyOptions, writer: anytype) !void {
+            _ = options;
             try writer.print("{}", .{self.toRaw()});
         }
     };
@@ -205,6 +211,7 @@ pub const Gateway = struct {
         offline,
 
         pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
+            _ = options;
             try writer.writeAll("\"");
             try writer.writeAll(@tagName(self));
             try writer.writeAll("\"");
@@ -219,7 +226,7 @@ pub const Gateway = struct {
     };
 
     pub const Activity = struct {
-        type: enum {
+        type: enum(u3) {
             Game = 0,
             Streaming = 1,
             Listening = 2,
@@ -227,6 +234,7 @@ pub const Gateway = struct {
             Competing = 5,
 
             pub fn jsonStringify(self: @This(), options: std.json.StringifyOptions, writer: anytype) !void {
+                _ = options;
                 try writer.print("{d}", .{@enumToInt(self)});
             }
         },

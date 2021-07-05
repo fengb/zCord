@@ -16,7 +16,6 @@ const PathToken = union(enum) {
         fn next(self: *Tokenizer) !?PathToken {
             if (self.index >= self.string.len) return null;
 
-            var token_start = self.index;
             switch (self.string[self.index]) {
                 '[' => {
                     self.index += 1;
@@ -230,7 +229,7 @@ const AstNode = struct {
                 while (try json_element.arrayNext()) |item| : (i += 1) match: {
                     inline for (array) |child| {
                         if (child.index == i) {
-                            try child.node.apply(json_element, matches, result);
+                            try child.node.apply(item, matches, result);
                             break :match;
                         }
                     }
@@ -260,7 +259,7 @@ fn RequiredMatches(comptime T: type) type {
 }
 
 pub fn match(allocator: ?*std.mem.Allocator, json_element: anytype, comptime T: type) !T {
-    comptime const ast = try AstNode.init(T);
+    const ast = comptime try AstNode.init(T);
 
     var result: T = undefined;
     inline for (std.meta.fields(T)) |field| {

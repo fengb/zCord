@@ -413,7 +413,7 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
 }
 
 pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
-    const ssl_tunnel = self.ssl_tunnel orelse return error.NotConnected;
+    if (self.ssl_tunnel == null) return error.NotConnected;
 
     var buf: [0x1000]u8 = undefined;
     const msg = try std.fmt.bufPrint(&buf, "{s}", .{json.format(command)});
