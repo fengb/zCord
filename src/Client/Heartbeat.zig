@@ -61,7 +61,7 @@ pub const CallbackHandler = struct {
 const ThreadHandler = struct {
     allocator: *std.mem.Allocator,
     mailbox: util.Mailbox(Message),
-    thread: *std.Thread,
+    thread: std.Thread,
 
     fn init(client: *Client) !*ThreadHandler {
         const result = try client.allocator.create(ThreadHandler);
@@ -71,26 +71,26 @@ const ThreadHandler = struct {
         try result.mailbox.init();
         errdefer result.mailbox.deinit();
 
-        result.thread = try std.Thread.spawn(handler, .{ .ctx = result, .client = client });
+        result.thread = try std.Thread.spawn(.{}, handler, .{ result, client });
         return result;
     }
 
     fn deinit(ctx: *ThreadHandler) void {
         ctx.mailbox.putOverwrite(.deinit);
         // Reap the thread
-        ctx.thread.wait();
+        ctx.thread.join();
         ctx.mailbox.deinit();
         ctx.allocator.destroy(ctx);
     }
 
-    fn handler(args: struct { ctx: *ThreadHandler, client: *Client }) void {
+    fn handler(ctx: *ThreadHandler, client: *Client) void {
         var heartbeat_interval_ms: u64 = 0;
         var ack = false;
         while (true) {
             if (heartbeat_interval_ms == 0) {
-                switch (args.ctx.mailbox.get()) {
+                switch (ctx.mailbox.get()) {
                     .start => {
-                        heartbeat_interval_ms = args.client.connect_info.?.heartbeat_interval_ms;
+                        heartbeat_interval_ms = client.connect_info.?.heartbeat_interval_ms;
                         ack = true;
                     },
                     .ack, .stop => {},
@@ -99,7 +99,7 @@ const ThreadHandler = struct {
             } else {
                 // Force fire the heartbeat earlier
                 const timeout_ms = heartbeat_interval_ms - 1000;
-                if (args.ctx.mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
+                if (ctx.mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
                         .start => {},
                         .ack => {
@@ -115,7 +115,7 @@ const ThreadHandler = struct {
                 if (ack) {
                     ack = false;
                     // TODO: actually check this or fix threads + async
-                    if (nosuspend args.client.sendCommand(.{ .heartbeat = args.client.connect_info.?.seq })) |_| {
+                    if (nosuspend client.sendCommand(.{ .heartbeat = client.connect_info.?.seq })) |_| {
                         log.info(">> ♡", .{});
                         continue;
                     } else |_| {
@@ -125,7 +125,7 @@ const ThreadHandler = struct {
                     log.info("Missed heartbeat. Reconnecting...", .{});
                 }
 
-                args.client.ssl_tunnel.?.shutdown() catch |err| {
+                client.ssl_tunnel.?.shutdown() catch |err| {
                     log.info("Shutdown failed: {}", .{err});
                 };
                 heartbeat_interval_ms = 0;

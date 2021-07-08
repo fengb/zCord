@@ -18,7 +18,7 @@ pub fn main() !void {
     });
     defer c.destroy();
 
-    _ = try std.Thread.spawn(chaosMonkey, c);
+    _ = try std.Thread.spawn(.{}, chaosMonkey, .{c});
 
     try c.ws(struct {
         pub fn handleConnect(_: *zCord.Client, info: zCord.Client.ConnectInfo) void {
