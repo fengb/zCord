@@ -129,7 +129,8 @@ fn connect(self: *Client) !ConnectInfo {
     // Handshake
     try self.wz.handshakeStart("/?v=6&encoding=json");
     try self.wz.handshakeAddHeaderValue("Host", host);
-    try self.wz.handshakeFinish();
+    try self.wz.handshakeFinishHeaders();
+    _ = try self.wz.handshakeAccept();
 
     if (try self.wz.next()) |event| {
         std.debug.assert(event == .header);
