@@ -46,7 +46,7 @@ pub fn Snowflake(comptime scope: @Type(.EnumLiteral)) type {
         }
 
         pub fn jsonStringify(self: Self, options: std.json.StringifyOptions, writer: anytype) !void {
-          _ = options;
+            _ = options;
             try writer.print("\"{}\"", .{@enumToInt(self)});
         }
     };
@@ -230,6 +230,7 @@ pub const Gateway = struct {
             Game = 0,
             Streaming = 1,
             Listening = 2,
+            Watching = 3,
             Custom = 4,
             Competing = 5,
 
