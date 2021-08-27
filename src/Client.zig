@@ -36,7 +36,7 @@ pub const ConnectInfo = struct {
     heartbeat_interval_ms: u64,
     seq: u32,
     user_id: discord.Snowflake(.user),
-    session_id: util.Fixbuf(0x100),
+    session_id: std.BoundedArray(u8, 0x100),
 };
 
 pub fn create(args: struct {
@@ -168,7 +168,7 @@ fn connect(self: *Client) !ConnectInfo {
         try self.sendCommand(.{ .@"resume" = .{
             .token = self.auth_token,
             .seq = old_info.seq,
-            .session_id = old_info.session_id.slice(),
+            .session_id = old_info.session_id.constSlice(),
         } });
         result.seq = old_info.seq;
         result.user_id = old_info.user_id;
@@ -203,14 +203,14 @@ fn connect(self: *Client) !ConnectInfo {
 
         const root = try stream.root();
         const paths = try json.path.match(null, root, struct {
-            @"t": util.Fixbuf(0x100),
+            @"t": std.BoundedArray(u8, 0x100),
             @"s": ?u32,
             @"op": u8,
-            @"d.session_id": util.Fixbuf(0x100),
+            @"d.session_id": std.BoundedArray(u8, 0x100),
             @"d.user.id": discord.Snowflake(.user),
         });
 
-        if (!std.mem.eql(u8, paths.@"t".slice(), "READY")) {
+        if (!std.mem.eql(u8, paths.@"t".constSlice(), "READY")) {
             return error.MalformedIdentify;
         }
         if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.dispatch)) {

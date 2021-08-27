@@ -187,6 +187,27 @@ const AstNode = struct {
             const Unwrapped = if (@typeInfo(T) == .Optional) std.meta.Child(T) else T;
             return if (@typeInfo(Unwrapped) == .Float) Unwrapped else struct {};
         }
+
+        fn BoundedArray(comptime T: type) type {
+            const NotMatch = struct {};
+            if (@typeInfo(T) != .Struct) {
+                return NotMatch;
+            }
+
+            if (!@hasField(T, "len") or
+                std.meta.fieldInfo(T, .len).field_type != usize)
+            {
+                return NotMatch;
+            }
+
+            if (!@hasField(T, "buffer") or
+                @typeInfo(std.meta.fieldInfo(T, .buffer).field_type) != .Array)
+            {
+                return NotMatch;
+            }
+
+            return T;
+        }
     };
 
     fn apply(comptime self: AstNode, allocator: ?*std.mem.Allocator, json_element: anytype, matches: anytype, result: anytype) !void {
@@ -203,6 +224,12 @@ const AstNode = struct {
                     },
                     GenMatch.Int(AtomType), GenMatch.Float(AtomType) => try json_element.number(AtomType),
                     ?GenMatch.Int(AtomType), ?GenMatch.Float(AtomType) => try json_element.optionalNumber(std.meta.Child(AtomType)),
+                    GenMatch.BoundedArray(AtomType) => blk: {
+                        var atom: AtomType = undefined;
+                        const string = try json_element.stringBuffer(&atom.buffer);
+                        atom.len = string.len;
+                        break :blk atom;
+                    },
                     else => switch (comptime std.meta.trait.hasFn("consumeJsonElement")(AtomType)) {
                         true => try AtomType.consumeJsonElement(json_element),
                         else => @compileError("Type not supported " ++ @typeName(AtomType)),
@@ -382,7 +409,7 @@ test "nested" {
     const root = try str.root();
     try expectEqual(root.kind, .Object);
 
-    const m = try match(std.testing.allocator, root, struct {
+    const m = try match(null, root, struct {
         @"nest.foo": u32,
         @"nest.bar": bool,
     });

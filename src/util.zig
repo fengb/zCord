@@ -1,53 +1,6 @@
 const std = @import("std");
 
-pub fn Fixbuf(comptime max_len: usize) type {
-    return struct {
-        const Self = @This();
-
-        data: [max_len]u8 = undefined,
-        len: usize = 0,
-
-        pub fn copyFrom(self: *@This(), data: []const u8) void {
-            std.mem.copy(u8, &self.data, data);
-            self.len = data.len;
-        }
-
-        pub fn slice(self: @This()) []const u8 {
-            return self.data[0..self.len];
-        }
-
-        pub fn append(self: *@This(), char: u8) !void {
-            if (self.len >= max_len) {
-                return error.NoSpaceLeft;
-            }
-            self.data[self.len] = char;
-            self.len += 1;
-        }
-
-        pub fn last(self: @This()) ?u8 {
-            if (self.len > 0) {
-                return self.data[self.len - 1];
-            } else {
-                return null;
-            }
-        }
-
-        pub fn pop(self: *@This()) !u8 {
-            if (self.last()) |c| {
-                self.len -= 1;
-                return c;
-            }
-            return error.Empty;
-        }
-
-        pub fn consumeJsonElement(elem: anytype) !Self {
-            var result = Self{};
-            const string = try elem.stringBuffer(&result.data);
-            result.len = string.len;
-            return result;
-        }
-    };
-}
+pub const Fixbuf = @compileError("Please use std.BoundedArray instead");
 
 pub fn errSetContains(comptime ErrorSet: type, err: anyerror) bool {
     inline for (comptime std.meta.fields(ErrorSet)) |e| {
