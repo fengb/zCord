@@ -289,7 +289,33 @@ fn RequiredMatches(comptime T: type) type {
     });
 }
 
-pub fn match(allocator: ?*std.mem.Allocator, json_element: anytype, comptime T: type) !T {
+pub fn match(json_element: anytype, comptime T: type) !T {
+    const ast = comptime try AstNode.init(T);
+
+    var result: T = undefined;
+    inline for (std.meta.fields(T)) |field| {
+        switch (field.field_type) {
+            []u8, []const u8, ?[]u8, ?[]const u8 => @compileError("Cannot match() on strings. Please use matchAlloc() instead."),
+            else => {},
+        }
+        if (@typeInfo(field.field_type) == .Optional) {
+            @field(result, field.name) = null;
+        }
+    }
+
+    var matches: RequiredMatches(T) = .{};
+
+    try ast.apply(null, json_element, &matches, &result);
+
+    inline for (std.meta.fields(@TypeOf(matches))) |field| {
+        if (!@field(matches, field.name)) {
+            return error.Required;
+        }
+    }
+    return result;
+}
+
+pub fn matchAlloc(allocator: *std.mem.Allocator, json_element: anytype, comptime T: type) !T {
     const ast = comptime try AstNode.init(T);
 
     var result: T = undefined;
@@ -306,12 +332,12 @@ pub fn match(allocator: ?*std.mem.Allocator, json_element: anytype, comptime T: 
             switch (field.field_type) {
                 ?[]const u8, ?[]u8 => {
                     if (@field(result, field.name)) |str| {
-                        allocator.?.free(str);
+                        allocator.free(str);
                     }
                 },
                 []const u8, []u8 => {
                     if (@field(matches, field.name)) {
-                        allocator.?.free(@field(result, field.name));
+                        allocator.free(@field(result, field.name));
                     }
                 },
                 else => {},
@@ -346,7 +372,7 @@ test "simple match" {
     const root = try str.root();
     try expectEqual(root.kind, .Object);
 
-    const m = try match(std.testing.allocator, root, struct {
+    const m = try matchAlloc(std.testing.allocator, root, struct {
         @"foo": bool,
         @"bar": u32,
         @"baz": []const u8,
@@ -393,7 +419,7 @@ test "custom function" {
         }
     };
 
-    const m = try match(null, root, struct {
+    const m = try match(root, struct {
         @"foo": Fruit,
     });
 
@@ -409,7 +435,7 @@ test "nested" {
     const root = try str.root();
     try expectEqual(root.kind, .Object);
 
-    const m = try match(null, root, struct {
+    const m = try match(root, struct {
         @"nest.foo": u32,
         @"nest.bar": bool,
     });
@@ -429,7 +455,7 @@ test "optionals" {
     const root = try str.root();
     try expectEqual(root.kind, .Object);
 
-    const m = try match(std.testing.allocator, root, struct {
+    const m = try matchAlloc(std.testing.allocator, root, struct {
         @"foo": ?bool,
         @"bar": ?u32,
         @"baz": ?[]const u8,
@@ -448,7 +474,7 @@ test "requireds" {
     const root = try str.root();
     try expectEqual(root.kind, .Object);
 
-    try std.testing.expectError(error.Required, match(std.testing.allocator, root, struct {
+    try std.testing.expectError(error.Required, matchAlloc(std.testing.allocator, root, struct {
         @"foo": bool,
         @"bar": u32,
         @"baz": []const u8,

@@ -147,7 +147,7 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        const paths = try json.path.match(null, root, struct {
+        const paths = try json.path.match(root, struct {
             @"op": u8,
             @"d.heartbeat_interval": u32,
         });
@@ -202,7 +202,7 @@ fn connect(self: *Client) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        const paths = try json.path.match(null, root, struct {
+        const paths = try json.path.match(root, struct {
             @"t": std.BoundedArray(u8, 0x100),
             @"s": ?u32,
             @"op": u8,
