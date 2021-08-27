@@ -177,6 +177,18 @@ const AstNode = struct {
         }
     }
 
+    const GenMatch = struct {
+        fn Int(comptime T: type) type {
+            const Unwrapped = if (@typeInfo(T) == .Optional) std.meta.Child(T) else T;
+            return if (@typeInfo(Unwrapped) == .Int) Unwrapped else struct {};
+        }
+
+        fn Float(comptime T: type) type {
+            const Unwrapped = if (@typeInfo(T) == .Optional) std.meta.Child(T) else T;
+            return if (@typeInfo(Unwrapped) == .Float) Unwrapped else struct {};
+        }
+    };
+
     fn apply(comptime self: AstNode, allocator: ?*std.mem.Allocator, json_element: anytype, matches: anytype, result: anytype) !void {
         switch (self.data) {
             .empty => unreachable,
@@ -189,19 +201,11 @@ const AstNode = struct {
                         const reader = (try json_element.optionalStringReader()) orelse break :blk null;
                         break :blk try reader.readAllAlloc(allocator.?, std.math.maxInt(usize));
                     },
-                    else => switch (@typeInfo(AtomType)) {
-                        .Float, .Int => try json_element.number(AtomType),
-                        .Optional => |o_info| switch (@typeInfo(o_info.child)) {
-                            .Float, .Int => try json_element.optionalNumber(o_info.child),
-                            else => @compileError("Type not supported " ++ @typeName(AtomType)),
-                        },
-                        else => blk: {
-                            if (@hasDecl(AtomType, "consumeJsonElement")) {
-                                break :blk try AtomType.consumeJsonElement(json_element);
-                            } else {
-                                @compileError("Type not supported " ++ @typeName(AtomType));
-                            }
-                        },
+                    GenMatch.Int(AtomType), GenMatch.Float(AtomType) => try json_element.number(AtomType),
+                    ?GenMatch.Int(AtomType), ?GenMatch.Float(AtomType) => try json_element.optionalNumber(std.meta.Child(AtomType)),
+                    else => switch (comptime std.meta.trait.hasFn("consumeJsonElement")(AtomType)) {
+                        true => try AtomType.consumeJsonElement(json_element),
+                        else => @compileError("Type not supported " ++ @typeName(AtomType)),
                     },
                 };
 
