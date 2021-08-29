@@ -1,6 +1,198 @@
 const std = @import("std");
 const json = @import("../json.zig");
 
+pub fn match(json_element: anytype, comptime T: type) !T {
+    const ast = comptime try AstNode.init(T);
+
+    var result: T = undefined;
+    inline for (std.meta.fields(T)) |field| {
+        switch (field.field_type) {
+            []u8, []const u8, ?[]u8, ?[]const u8 => @compileError("Cannot match() on strings. Please use matchAlloc(), switch to BoundedArray(u8, nn), or write a custom parser."),
+            else => {},
+        }
+        if (@typeInfo(field.field_type) == .Optional) {
+            @field(result, field.name) = null;
+        }
+    }
+
+    var matches: RequiredMatches(T) = .{};
+
+    try ast.apply(null, json_element, &matches, &result);
+
+    inline for (std.meta.fields(@TypeOf(matches))) |field| {
+        if (!@field(matches, field.name)) {
+            return error.Required;
+        }
+    }
+    return result;
+}
+
+pub fn matchAlloc(allocator: *std.mem.Allocator, json_element: anytype, comptime T: type) !T {
+    const ast = comptime try AstNode.init(T);
+
+    var result: T = undefined;
+    inline for (std.meta.fields(T)) |field| {
+        if (@typeInfo(field.field_type) == .Optional) {
+            @field(result, field.name) = null;
+        }
+    }
+
+    var matches: RequiredMatches(T) = .{};
+
+    errdefer {
+        inline for (std.meta.fields(@TypeOf(result))) |field| {
+            switch (field.field_type) {
+                ?[]const u8, ?[]u8 => {
+                    if (@field(result, field.name)) |str| {
+                        allocator.free(str);
+                    }
+                },
+                []const u8, []u8 => {
+                    if (@field(matches, field.name)) {
+                        allocator.free(@field(result, field.name));
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    try ast.apply(allocator, json_element, &matches, &result);
+
+    inline for (std.meta.fields(@TypeOf(matches))) |field| {
+        if (!@field(matches, field.name)) {
+            return error.Required;
+        }
+    }
+    return result;
+}
+
+pub fn freeMatch(allocator: *std.mem.Allocator, value: anytype) void {
+    inline for (std.meta.fields(@TypeOf(value))) |field| {
+        if (field.field_type == []const u8) {
+            allocator.free(@field(value, field.name));
+        }
+    }
+}
+
+test "simple match" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"foo": true, "bar": 2, "baz": "nop"}
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    const m = try matchAlloc(std.testing.allocator, root, struct {
+        @"foo": bool,
+        @"bar": u32,
+        @"baz": []const u8,
+    });
+    defer freeMatch(std.testing.allocator, m);
+
+    try expectEqual(m.@"foo", true);
+    try expectEqual(m.@"bar", 2);
+    try std.testing.expectEqualStrings(m.@"baz", "nop");
+}
+
+test "custom function" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"foo": "banana"}
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    const Fruit = enum(u32) {
+        const Self = @This();
+
+        pear,
+        banana,
+        apple,
+        chocolate,
+        _,
+
+        pub fn consumeJsonElement(element: anytype) !Self {
+            var buffer: [0x100]u8 = undefined;
+            const raw = try element.stringBuffer(&buffer);
+            if (std.mem.eql(u8, raw, "pear")) {
+                return Self.pear;
+            } else if (std.mem.eql(u8, raw, "banana")) {
+                return Self.banana;
+            } else if (std.mem.eql(u8, raw, "apple")) {
+                return Self.apple;
+            } else if (std.mem.eql(u8, raw, "chocolate")) {
+                return Self.chocolate;
+            } else {
+                return @intToEnum(Self, 0xAA);
+            }
+        }
+    };
+
+    const m = try match(root, struct {
+        @"foo": Fruit,
+    });
+
+    try expectEqual(m.@"foo", .banana);
+}
+
+test "nested" {
+    var fbs = std.io.fixedBufferStream(
+        \\{"nest": { "foo": 1, "bar": false } }
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    const m = try match(root, struct {
+        @"nest.foo": u32,
+        @"nest.bar": bool,
+    });
+
+    try expectEqual(m.@"nest.foo", 1);
+    try expectEqual(m.@"nest.bar", false);
+}
+
+fn expectEqual(actual: anytype, expected: @TypeOf(actual)) !void {
+    try std.testing.expectEqual(expected, actual);
+}
+
+test "optionals" {
+    var fbs = std.io.fixedBufferStream("{}");
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    const m = try matchAlloc(std.testing.allocator, root, struct {
+        @"foo": ?bool,
+        @"bar": ?u32,
+        @"baz": ?[]const u8,
+    });
+    defer freeMatch(std.testing.allocator, m);
+
+    try expectEqual(m.@"foo", null);
+    try expectEqual(m.@"bar", null);
+    try expectEqual(m.@"baz", null);
+}
+
+test "requireds" {
+    var fbs = std.io.fixedBufferStream("{}");
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    try std.testing.expectError(error.Required, matchAlloc(std.testing.allocator, root, struct {
+        @"foo": bool,
+        @"bar": u32,
+        @"baz": []const u8,
+    }));
+}
+
 const PathToken = union(enum) {
     index: u32,
     key: []const u8,
@@ -287,196 +479,4 @@ fn RequiredMatches(comptime T: type) type {
             .is_tuple = false,
         },
     });
-}
-
-pub fn match(json_element: anytype, comptime T: type) !T {
-    const ast = comptime try AstNode.init(T);
-
-    var result: T = undefined;
-    inline for (std.meta.fields(T)) |field| {
-        switch (field.field_type) {
-            []u8, []const u8, ?[]u8, ?[]const u8 => @compileError("Cannot match() on strings. Please use matchAlloc() instead."),
-            else => {},
-        }
-        if (@typeInfo(field.field_type) == .Optional) {
-            @field(result, field.name) = null;
-        }
-    }
-
-    var matches: RequiredMatches(T) = .{};
-
-    try ast.apply(null, json_element, &matches, &result);
-
-    inline for (std.meta.fields(@TypeOf(matches))) |field| {
-        if (!@field(matches, field.name)) {
-            return error.Required;
-        }
-    }
-    return result;
-}
-
-pub fn matchAlloc(allocator: *std.mem.Allocator, json_element: anytype, comptime T: type) !T {
-    const ast = comptime try AstNode.init(T);
-
-    var result: T = undefined;
-    inline for (std.meta.fields(T)) |field| {
-        if (@typeInfo(field.field_type) == .Optional) {
-            @field(result, field.name) = null;
-        }
-    }
-
-    var matches: RequiredMatches(T) = .{};
-
-    errdefer {
-        inline for (std.meta.fields(@TypeOf(result))) |field| {
-            switch (field.field_type) {
-                ?[]const u8, ?[]u8 => {
-                    if (@field(result, field.name)) |str| {
-                        allocator.free(str);
-                    }
-                },
-                []const u8, []u8 => {
-                    if (@field(matches, field.name)) {
-                        allocator.free(@field(result, field.name));
-                    }
-                },
-                else => {},
-            }
-        }
-    }
-
-    try ast.apply(allocator, json_element, &matches, &result);
-
-    inline for (std.meta.fields(@TypeOf(matches))) |field| {
-        if (!@field(matches, field.name)) {
-            return error.Required;
-        }
-    }
-    return result;
-}
-
-pub fn freeMatch(allocator: *std.mem.Allocator, value: anytype) void {
-    inline for (std.meta.fields(@TypeOf(value))) |field| {
-        if (field.field_type == []const u8) {
-            allocator.free(@field(value, field.name));
-        }
-    }
-}
-
-test "simple match" {
-    var fbs = std.io.fixedBufferStream(
-        \\{"foo": true, "bar": 2, "baz": "nop"}
-    );
-    var str = json.stream(fbs.reader());
-
-    const root = try str.root();
-    try expectEqual(root.kind, .Object);
-
-    const m = try matchAlloc(std.testing.allocator, root, struct {
-        @"foo": bool,
-        @"bar": u32,
-        @"baz": []const u8,
-    });
-    defer freeMatch(std.testing.allocator, m);
-
-    try expectEqual(m.@"foo", true);
-    try expectEqual(m.@"bar", 2);
-    try std.testing.expectEqualStrings(m.@"baz", "nop");
-}
-
-test "custom function" {
-    var fbs = std.io.fixedBufferStream(
-        \\{"foo": "banana"}
-    );
-    var str = json.stream(fbs.reader());
-
-    const root = try str.root();
-    try expectEqual(root.kind, .Object);
-
-    const Fruit = enum(u32) {
-        const Self = @This();
-
-        pear,
-        banana,
-        apple,
-        chocolate,
-        _,
-
-        pub fn consumeJsonElement(element: anytype) !Self {
-            var buffer: [0x100]u8 = undefined;
-            const raw = try element.stringBuffer(&buffer);
-            if (std.mem.eql(u8, raw, "pear")) {
-                return Self.pear;
-            } else if (std.mem.eql(u8, raw, "banana")) {
-                return Self.banana;
-            } else if (std.mem.eql(u8, raw, "apple")) {
-                return Self.apple;
-            } else if (std.mem.eql(u8, raw, "chocolate")) {
-                return Self.chocolate;
-            } else {
-                return @intToEnum(Self, 0xAA);
-            }
-        }
-    };
-
-    const m = try match(root, struct {
-        @"foo": Fruit,
-    });
-
-    try expectEqual(m.@"foo", .banana);
-}
-
-test "nested" {
-    var fbs = std.io.fixedBufferStream(
-        \\{"nest": { "foo": 1, "bar": false } }
-    );
-    var str = json.stream(fbs.reader());
-
-    const root = try str.root();
-    try expectEqual(root.kind, .Object);
-
-    const m = try match(root, struct {
-        @"nest.foo": u32,
-        @"nest.bar": bool,
-    });
-
-    try expectEqual(m.@"nest.foo", 1);
-    try expectEqual(m.@"nest.bar", false);
-}
-
-fn expectEqual(actual: anytype, expected: @TypeOf(actual)) !void {
-    try std.testing.expectEqual(expected, actual);
-}
-
-test "optionals" {
-    var fbs = std.io.fixedBufferStream("{}");
-    var str = json.stream(fbs.reader());
-
-    const root = try str.root();
-    try expectEqual(root.kind, .Object);
-
-    const m = try matchAlloc(std.testing.allocator, root, struct {
-        @"foo": ?bool,
-        @"bar": ?u32,
-        @"baz": ?[]const u8,
-    });
-    defer freeMatch(std.testing.allocator, m);
-
-    try expectEqual(m.@"foo", null);
-    try expectEqual(m.@"bar", null);
-    try expectEqual(m.@"baz", null);
-}
-
-test "requireds" {
-    var fbs = std.io.fixedBufferStream("{}");
-    var str = json.stream(fbs.reader());
-
-    const root = try str.root();
-    try expectEqual(root.kind, .Object);
-
-    try std.testing.expectError(error.Required, matchAlloc(std.testing.allocator, root, struct {
-        @"foo": bool,
-        @"bar": u32,
-        @"baz": []const u8,
-    }));
 }
