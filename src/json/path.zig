@@ -1,6 +1,18 @@
 const std = @import("std");
 const json = @import("../json.zig");
 
+pub fn Wrap(comptime T: type, comptime func: anytype) type {
+    return struct {
+        data: T,
+
+        pub fn consumeJsonElement(json_element: anytype) !@This() {
+            var result: @This() = undefined;
+            result.data = try func(json_element);
+            return result;
+        }
+    };
+}
+
 pub fn match(json_element: anytype, comptime T: type) !T {
     const ast = comptime try AstNode.init(T);
 
@@ -191,6 +203,29 @@ test "requireds" {
         @"bar": u32,
         @"baz": []const u8,
     }));
+}
+
+test "Wrap" {
+    const imTheBoss = struct {
+        pub fn imTheBoss(json_element: anytype) ![]const u8 {
+            _ = try json_element.finalizeToken();
+            return "I'm the boss";
+        }
+    }.imTheBoss;
+
+    var fbs = std.io.fixedBufferStream(
+        \\{ "boss": 420 }
+    );
+    var str = json.stream(fbs.reader());
+
+    const root = try str.root();
+    try expectEqual(root.kind, .Object);
+
+    const m = try match(root, struct {
+        @"boss": Wrap([]const u8, imTheBoss),
+    });
+
+    try std.testing.expectEqualStrings("I'm the boss", m.@"boss".data);
 }
 
 const PathToken = union(enum) {
