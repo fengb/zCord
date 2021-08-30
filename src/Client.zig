@@ -15,7 +15,6 @@ const Client = @This();
 
 allocator: *std.mem.Allocator,
 
-context: ?*c_void,
 auth_token: []const u8,
 user_agent: []const u8,
 intents: discord.Gateway.Intents,
@@ -43,7 +42,6 @@ pub fn create(args: struct {
     allocator: *std.mem.Allocator,
     auth_token: []const u8,
     user_agent: []const u8 = default_agent,
-    context: ?*c_void = null,
     intents: discord.Gateway.Intents = .{},
     presence: discord.Gateway.Presence = .{},
     heartbeat: Heartbeat.Strategy = Heartbeat.Strategy.default,
@@ -52,7 +50,6 @@ pub fn create(args: struct {
     errdefer args.allocator.destroy(result);
     result.allocator = args.allocator;
 
-    result.context = args.context;
     result.auth_token = args.auth_token;
     result.user_agent = args.user_agent;
     result.intents = args.intents;
@@ -74,10 +71,6 @@ pub fn destroy(self: *Client) void {
     }
     self.heartbeat.deinit();
     self.allocator.destroy(self);
-}
-
-pub fn ctx(self: *Client, comptime T: type) *T {
-    return @ptrCast(*T, @alignCast(@alignOf(T), self.context.?));
 }
 
 fn fetchGatewayHost(self: *Client, buffer: []u8) ![]const u8 {
@@ -236,7 +229,7 @@ fn disconnect(self: *Client) void {
     }
 }
 
-pub fn ws(self: *Client, handler: anytype) !void {
+pub fn ws(self: *Client, context: anytype, handler: anytype) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         self.connect_info = self.connect() catch |err| switch (err) {
@@ -254,7 +247,7 @@ pub fn ws(self: *Client, handler: anytype) !void {
         defer self.disconnect();
 
         if (@hasDecl(handler, "handleConnect")) {
-            handler.handleConnect(self, self.connect_info.?);
+            handler.handleConnect(context, self.connect_info.?);
         }
 
         reconnect_wait = 1;
@@ -262,7 +255,7 @@ pub fn ws(self: *Client, handler: anytype) !void {
         self.heartbeat.send(.start);
         defer self.heartbeat.send(.stop);
 
-        self.listen(handler) catch |err| switch (err) {
+        self.listen(context, handler) catch |err| switch (err) {
             error.ConnectionReset => continue,
             error.InvalidSession => {
                 self.connect_info = null;
@@ -330,11 +323,11 @@ fn processCloseEvent(self: *Client) !void {
     }
 }
 
-fn listen(self: *Client, handler: anytype) !void {
+fn listen(self: *Client, context: anytype, handler: anytype) !void {
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
             .Text => {
-                self.processChunks(self.wz.reader(), handler) catch |err| switch (err) {
+                self.processChunks(self.wz.reader(), context, handler) catch |err| switch (err) {
                     error.ConnectionReset, error.InvalidSession => |e| return e,
                     else => {
                         log.warn("Process chunks failed: {s}", .{err});
@@ -353,7 +346,7 @@ fn listen(self: *Client, handler: anytype) !void {
     return error.ConnectionReset;
 }
 
-fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
+fn processChunks(self: *Client, reader: anytype, context: anytype, handler: anytype) !void {
     var stream = json.stream(reader);
     errdefer |err| {
         if (util.errSetContains(@TypeOf(stream).ParseError, err)) {
@@ -384,7 +377,7 @@ fn processChunks(self: *Client, reader: anytype, handler: anytype) !void {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
                     try handler.handleDispatch(
-                        self,
+                        context,
                         name orelse return error.DispatchWithoutName,
                         el_data,
                     );

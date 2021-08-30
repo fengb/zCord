@@ -11,21 +11,21 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    const c = try zCord.Client.create(.{
+    const client = try zCord.Client.create(.{
         .allocator = &gpa.allocator,
         .auth_token = auth,
         .intents = .{},
     });
-    defer c.destroy();
+    defer client.destroy();
 
-    _ = try std.Thread.spawn(.{}, chaosMonkey, .{c});
+    _ = try std.Thread.spawn(.{}, chaosMonkey, .{client});
 
-    try c.ws(struct {
-        pub fn handleConnect(_: *zCord.Client, info: zCord.Client.ConnectInfo) void {
+    try client.ws({}, struct {
+        pub fn handleConnect(_: void, info: zCord.Client.ConnectInfo) void {
             std.debug.print("Connected as {}\n", .{info.user_id});
         }
 
-        pub fn handleDispatch(_: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {
+        pub fn handleDispatch(_: void, name: []const u8, data: zCord.JsonElement) !void {
             _ = name;
             _ = data;
         }
