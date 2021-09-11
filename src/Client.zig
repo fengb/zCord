@@ -229,7 +229,7 @@ fn disconnect(self: *Client) void {
     }
 }
 
-pub fn ws(self: *Client, context: anytype, handler: anytype) !void {
+pub fn ws(self: *Client, context: anytype, comptime handler: type) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         self.connect_info = self.connect() catch |err| switch (err) {
@@ -323,7 +323,7 @@ fn processCloseEvent(self: *Client) !void {
     }
 }
 
-fn listen(self: *Client, context: anytype, handler: anytype) !void {
+fn listen(self: *Client, context: anytype, comptime handler: type) !void {
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
             .Text => {
@@ -346,7 +346,7 @@ fn listen(self: *Client, context: anytype, handler: anytype) !void {
     return error.ConnectionReset;
 }
 
-fn processChunks(self: *Client, reader: anytype, context: anytype, handler: anytype) !void {
+fn processChunks(self: *Client, reader: anytype, context: anytype, comptime handler: type) !void {
     var stream = json.stream(reader);
     errdefer |err| {
         if (util.errSetContains(@TypeOf(stream).ParseError, err)) {
