@@ -203,6 +203,8 @@ fn connect(self: *Client) !ConnectInfo {
             @"op": u8,
             @"d.session_id": std.BoundedArray(u8, 0x100),
             @"d.user.id": discord.Snowflake(.user),
+            @"d.user.username": std.BoundedArray(u8, 0x100),
+            @"d.user.discriminator": std.BoundedArray(u8, 0x100),
         });
 
         if (!std.mem.eql(u8, paths.@"t".constSlice(), "READY")) {
@@ -218,6 +220,11 @@ fn connect(self: *Client) !ConnectInfo {
 
         result.user_id = paths.@"d.user.id";
         result.session_id = paths.@"d.session_id";
+
+        log.info("Connected -- {s}#{s}", .{
+            paths.@"d.user.username".constSlice(),
+            paths.@"d.user.discriminator".constSlice(),
+        });
     }
     try flush_error;
 
