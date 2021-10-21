@@ -22,26 +22,14 @@ pub fn main() !void {
         pub fn handleDispatch(cli: *zCord.Client, name: []const u8, data: zCord.JsonElement) !void {
             if (!std.mem.eql(u8, name, "MESSAGE_CREATE")) return;
 
-            var msg_buffer: [0x1000]u8 = undefined;
-            var msg: ?[]u8 = null;
-            var channel_id: ?zCord.Snowflake(.channel) = null;
+            const paths = try zCord.json.path.match(data, struct {
+                @"channel_id": zCord.Snowflake(.channel),
+                @"content": std.BoundedArray(u8, 0x1000),
+            });
 
-            while (try data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
-                .content => {
-                    msg = match.value.stringBuffer(&msg_buffer) catch |err| switch (err) {
-                        error.StreamTooLong => &msg_buffer,
-                        else => |e| return e,
-                    };
-                    _ = try match.value.finalizeToken();
-                },
-                .channel_id => {
-                    channel_id = try zCord.Snowflake(.channel).consumeJsonElement(match.value);
-                },
-            };
-
-            if (channel_id != null and msg != null and std.mem.eql(u8, msg.?, "Hello")) {
+            if (std.mem.eql(u8, paths.content.constSlice(), "Hello")) {
                 var buf: [0x100]u8 = undefined;
-                const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{channel_id.?});
+                const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
 
                 var req = try cli.sendRequest(cli.allocator, .POST, path, .{
                     .content = "World",
