@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 pub const path = @import("json/path.zig");
 
 const log = std.log.scoped(.zCord);
-const debug_buffer = std.builtin.mode == .Debug;
+const debug_buffer = builtin.mode == .Debug;
 
 pub fn Formatter(comptime T: type) type {
     return struct {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 /// Discord utilizes Twitter's snowflake format for uniquely identifiable
 /// descriptors (IDs). These IDs are guaranteed to be unique across all of
@@ -123,7 +124,7 @@ pub const Gateway = struct {
         identify: struct {
             token: []const u8,
             properties: struct {
-                @"$os": []const u8 = @tagName(std.Target.current.os.tag),
+                @"$os": []const u8 = @tagName(builtin.target.os.tag),
                 @"$browser": []const u8,
                 @"$device": []const u8,
             },

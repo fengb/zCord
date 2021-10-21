@@ -56,7 +56,7 @@ pub const Tunnel = struct {
             .trusted_certificates = trusted_chain.data.items,
             .temp_allocator = args.allocator,
         }, args.host);
-        errdefer client.close_notify() catch {};
+        errdefer result.client.close_notify() catch {};
 
         return result;
     }

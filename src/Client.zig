@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const hzzp = @import("hzzp");
 const wz = @import("wz");
 
@@ -174,7 +176,7 @@ fn connect(self: *Client) !ConnectInfo {
         .intents = self.intents,
         .token = self.auth_token,
         .properties = .{
-            .@"$os" = @tagName(std.Target.current.os.tag),
+            .@"$os" = @tagName(builtin.target.os.tag),
             .@"$browser" = self.user_agent,
             .@"$device" = self.user_agent,
         },

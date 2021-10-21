@@ -365,15 +365,15 @@ const AstNode = struct {
                     if (elem.index == index) {
                         // TODO: replace this awful copy with comptime allocators
                         var copy = self.data.array[0..self.data.array.len].*;
-                        try copy[i].node.insert(T, tokenizer);
+                        try copy[index].node.insert(T, tokenizer);
                         self.data.array = &copy;
                         break;
                     }
                 } else {
                     var new_node = AstNode{ .initial_path = tokenizer.string };
                     try new_node.insert(T, tokenizer);
-                    self.data.object = self.data.object ++ [_]Object{
-                        .{ .key = key, .node = new_node },
+                    self.data.array = self.data.array ++ [_]Array{
+                        .{ .index = index, .node = new_node },
                     };
                 }
             },
