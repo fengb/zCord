@@ -362,26 +362,26 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
 
     const root = try stream.root();
 
-    while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match) {
-        .t => |el_type| {
-            name = try el_type.optionalStringBuffer(&name_buf);
+    while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match.key) {
+        .t => {
+            name = try match.value.optionalStringBuffer(&name_buf);
         },
-        .s => |el_seq| {
-            if (try el_seq.optionalNumber(u32)) |seq| {
+        .s => {
+            if (try match.value.optionalNumber(u32)) |seq| {
                 self.connect_info.?.seq = seq;
             }
         },
-        .op => |el_op| {
-            op = try std.meta.intToEnum(discord.Gateway.Opcode, try el_op.number(u8));
+        .op => {
+            op = try std.meta.intToEnum(discord.Gateway.Opcode, try match.value.number(u8));
         },
-        .d => |el_data| {
+        .d => {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
                     try handler.handleDispatch(
                         context,
                         name orelse return error.DispatchWithoutName,
-                        el_data,
+                        match.value,
                     );
                 },
                 .heartbeat_ack => self.heartbeat.send(.ack),
@@ -391,7 +391,7 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
                 },
                 .invalid_session => {
                     log.info("Discord invalid session. Reconnecting...", .{});
-                    const resumable = el_data.boolean() catch false;
+                    const resumable = match.value.boolean() catch false;
                     if (resumable) {
                         return error.ConnectionReset;
                     } else {
@@ -400,10 +400,10 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
                 },
                 else => {
                     log.info("Unhandled {} -- {s}", .{ op, name });
-                    el_data.debugDump(std.io.getStdErr().writer()) catch {};
+                    match.value.debugDump(std.io.getStdErr().writer()) catch {};
                 },
             }
-            _ = try el_data.finalizeToken();
+            _ = try match.value.finalizeToken();
         },
     };
 }

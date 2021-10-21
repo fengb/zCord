@@ -26,16 +26,16 @@ pub fn main() !void {
             var msg: ?[]u8 = null;
             var channel_id: ?zCord.Snowflake(.channel) = null;
 
-            while (try data.objectMatch(enum { content, channel_id })) |match| switch (match) {
-                .content => |el_content| {
-                    msg = el_content.stringBuffer(&msg_buffer) catch |err| switch (err) {
+            while (try data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
+                .content => {
+                    msg = match.value.stringBuffer(&msg_buffer) catch |err| switch (err) {
                         error.StreamTooLong => &msg_buffer,
                         else => |e| return e,
                     };
-                    _ = try el_content.finalizeToken();
+                    _ = try match.value.finalizeToken();
                 },
-                .channel_id => |el_channel| {
-                    channel_id = try zCord.Snowflake(.channel).consumeJsonElement(el_channel);
+                .channel_id => {
+                    channel_id = try zCord.Snowflake(.channel).consumeJsonElement(match.value);
                 },
             };
 

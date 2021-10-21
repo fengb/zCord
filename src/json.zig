@@ -309,24 +309,14 @@ pub fn Stream(comptime Reader: type) type {
                 return try Element.init(self.ctx);
             }
 
-            fn ObjectMatchUnion(comptime TagType: type) type {
-                comptime var union_fields: []const std.builtin.TypeInfo.UnionField = &.{};
-                inline for (std.meta.fields(TagType)) |field| {
-                    union_fields = union_fields ++ [_]std.builtin.TypeInfo.UnionField{.{
-                        .name = field.name,
-                        .field_type = Element,
-                        .alignment = @alignOf(Element),
-                    }};
-                }
-
-                const Tagged = union(enum) { temp };
-                var info = @typeInfo(Tagged);
-                info.Union.tag_type = TagType;
-                info.Union.fields = union_fields;
-                return @Type(info);
+            fn ObjectMatch(comptime TagType: type) type {
+                return struct {
+                    key: TagType,
+                    value: Element,
+                };
             }
 
-            pub fn objectMatch(self: Element, comptime Enum: type) !?ObjectMatchUnion(Enum) {
+            pub fn objectMatch(self: Element, comptime Enum: type) !?ObjectMatch(Enum) {
                 comptime var string_keys: []const []const u8 = &.{};
                 inline for (std.meta.fields(Enum)) |field| {
                     string_keys = string_keys ++ [_][]const u8{field.name};
@@ -335,7 +325,7 @@ pub fn Stream(comptime Reader: type) type {
                 const raw_match = (try self.objectMatchAny(string_keys)) orelse return null;
                 inline for (string_keys) |key| {
                     if (std.mem.eql(u8, key, raw_match.key)) {
-                        return @unionInit(ObjectMatchUnion(Enum), key, raw_match.value);
+                        return ObjectMatch(Enum){ .key = @field(Enum, key), .value = raw_match.value };
                     }
                 }
                 unreachable;
@@ -1018,7 +1008,7 @@ test "object match any" {
     }
 }
 
-test "object match union" {
+test "object match" {
     var fbs = std.io.fixedBufferStream(
         \\{"foo": true, "foobar": false, "bar": null}
     );
@@ -1028,15 +1018,17 @@ test "object match union" {
     try expectEqual(root.kind, .Object);
 
     if (try root.objectMatch(enum { foobar, foo })) |match| {
-        try expectEqual(match.foo.kind, .Boolean);
-        try expectEqual(try match.foo.boolean(), true);
+        try expectEqual(match.key, .foo);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), true);
     } else {
         std.debug.panic("Expected a value", .{});
     }
 
     if (try root.objectMatch(enum { foo, foobar })) |match| {
-        try expectEqual(match.foobar.kind, .Boolean);
-        try expectEqual(try match.foobar.boolean(), false);
+        try expectEqual(match.key, .foobar);
+        try expectEqual(match.value.kind, .Boolean);
+        try expectEqual(try match.value.boolean(), false);
     } else {
         std.debug.panic("Expected a value", .{});
     }
