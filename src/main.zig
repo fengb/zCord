@@ -14,6 +14,6 @@ pub const Snowflake = discord.Snowflake;
 pub const Gateway = discord.Gateway;
 pub const Resource = discord.Resource;
 
-test {
+test "" {
     std.testing.refAllDecls(@This());
 }

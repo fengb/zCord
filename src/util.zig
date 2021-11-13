@@ -49,8 +49,8 @@ pub fn Mailbox(comptime T: type) type {
         pub fn get(self: *Self) T {
             self.reset_event.wait();
 
-            const held = self.mutex.acquire();
-            defer held.release();
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
             self.reset_event.reset();
             defer self.value = null;
@@ -60,8 +60,8 @@ pub fn Mailbox(comptime T: type) type {
         pub fn getWithTimeout(self: *Self, timeout_ns: u64) ?T {
             _ = self.reset_event.timedWait(timeout_ns);
 
-            const held = self.mutex.acquire();
-            defer held.release();
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
             self.reset_event.reset();
             defer self.value = null;
@@ -69,8 +69,8 @@ pub fn Mailbox(comptime T: type) type {
         }
 
         pub fn putOverwrite(self: *Self, value: T) void {
-            const held = self.mutex.acquire();
-            defer held.release();
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
             self.value = value;
             self.reset_event.set();

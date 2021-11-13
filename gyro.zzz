@@ -17,7 +17,7 @@ pkgs:
 
 deps:
   truemedian/hzzp: 0.1.7
-  truemedian/wz: 0.0.5
+  truemedian/wz: 0.0.6
   iguanaTLS:
     src:
       github:

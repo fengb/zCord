@@ -115,17 +115,36 @@ fn connect(self: *Client) !ConnectInfo {
     });
     errdefer self.disconnect();
 
+    const reader = self.ssl_tunnel.?.client.reader();
+    const writer = self.ssl_tunnel.?.client.writer();
+
+    const Reader = @TypeOf(reader);
+    const Writer = @TypeOf(writer);
+
+    const seed = @truncate(u64, @bitCast(u128, std.time.nanoTimestamp()));
+    var prng = std.rand.DefaultPrng.init(seed);
+
+    // Handshake
+
+    // DefaultHandshakeClient on 0.0.6
+    // HandshakeClient on master
+    //
+    // At the end I needed to change DefaultHandshakeClient src at the end
+    // This is solved on master branch
+    var handshake = wz.base.client.DefaultHandshakeClient(Reader, Writer).init(&self.wz_buffer, reader, writer, prng);
+    try handshake.writeStatusLine("/?v=6&encoding=json");
+    try handshake.writeHeaderValue("Host", host);
+    try handshake.finishHeaders();
+
+    if (!try handshake.wait()) {
+        return error.HandshakeError;
+    }
+
     self.wz = wz.base.client.create(
         &self.wz_buffer,
         self.ssl_tunnel.?.client.reader(),
         self.ssl_tunnel.?.client.writer(),
     );
-
-    // Handshake
-    try self.wz.handshakeStart("/?v=6&encoding=json");
-    try self.wz.handshakeAddHeaderValue("Host", host);
-    try self.wz.handshakeFinishHeaders();
-    _ = try self.wz.handshakeAccept();
 
     if (try self.wz.next()) |event| {
         std.debug.assert(event == .header);
@@ -135,6 +154,8 @@ fn connect(self: *Client) !ConnectInfo {
 
     var flush_error: WzClient.ReadNextError!void = {};
     {
+        std.log.info("here2", .{});
+
         var stream = json.stream(self.wz.reader());
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
@@ -184,7 +205,7 @@ fn connect(self: *Client) !ConnectInfo {
     } });
 
     if (try self.wz.next()) |event| {
-        if (event.header.opcode == .Close) {
+        if (event.header.opcode == .close) {
             try self.processCloseEvent();
         }
     }
@@ -335,7 +356,7 @@ fn processCloseEvent(self: *Client) !void {
 fn listen(self: *Client, context: anytype, comptime handler: type) !void {
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
-            .Text => {
+            .text => {
                 self.processChunks(self.wz.reader(), context, handler) catch |err| switch (err) {
                     error.ConnectionReset, error.InvalidSession => |e| return e,
                     else => {
@@ -344,9 +365,9 @@ fn listen(self: *Client, context: anytype, comptime handler: type) !void {
                 };
                 try self.wz.flushReader();
             },
-            .Ping, .Pong => {},
-            .Close => try self.processCloseEvent(),
-            .Binary => return error.WtfBinary,
+            .ping, .pong => {},
+            .close => try self.processCloseEvent(),
+            .binary => return error.WtfBinary,
             else => return error.WtfWtf,
         }
     }
@@ -421,10 +442,10 @@ pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
     var buf: [0x1000]u8 = undefined;
     const msg = try std.fmt.bufPrint(&buf, "{s}", .{json.format(command)});
 
-    const held = self.write_mutex.acquire();
-    defer held.release();
+    self.write_mutex.lock();
+    defer self.write_mutex.unlock();
 
-    try self.wz.writeHeader(.{ .opcode = .Text, .length = msg.len });
+    try self.wz.writeHeader(.{ .opcode = .text, .length = msg.len });
     try self.wz.writeChunk(msg);
 }
 
