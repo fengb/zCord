@@ -118,20 +118,8 @@ fn connect(self: *Client) !ConnectInfo {
     const reader = self.ssl_tunnel.?.client.reader();
     const writer = self.ssl_tunnel.?.client.writer();
 
-    const Reader = @TypeOf(reader);
-    const Writer = @TypeOf(writer);
-
-    const seed = @truncate(u64, @bitCast(u128, std.time.nanoTimestamp()));
-    var prng = std.rand.DefaultPrng.init(seed);
-
     // Handshake
-
-    // DefaultHandshakeClient on 0.0.6
-    // HandshakeClient on master
-    //
-    // At the end I needed to change DefaultHandshakeClient src at the end
-    // This is solved on master branch
-    var handshake = wz.base.client.DefaultHandshakeClient(Reader, Writer).init(&self.wz_buffer, reader, writer, prng);
+    var handshake = WzClient.handshake(&self.wz_buffer, reader, writer, std.crypto.random.*);
     try handshake.writeStatusLine("/?v=6&encoding=json");
     try handshake.writeHeaderValue("Host", host);
     try handshake.finishHeaders();
@@ -140,11 +128,7 @@ fn connect(self: *Client) !ConnectInfo {
         return error.HandshakeError;
     }
 
-    self.wz = wz.base.client.create(
-        &self.wz_buffer,
-        self.ssl_tunnel.?.client.reader(),
-        self.ssl_tunnel.?.client.writer(),
-    );
+    self.wz = handshake.socket();
 
     if (try self.wz.next()) |event| {
         std.debug.assert(event == .header);
@@ -154,8 +138,6 @@ fn connect(self: *Client) !ConnectInfo {
 
     var flush_error: WzClient.ReadNextError!void = {};
     {
-        std.log.info("here2", .{});
-
         var stream = json.stream(self.wz.reader());
         defer self.wz.flushReader() catch |err| {
             flush_error = err;

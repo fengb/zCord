@@ -17,7 +17,12 @@ pkgs:
 
 deps:
   truemedian/hzzp: 0.1.7
-  truemedian/wz: 0.0.6
+  wz:
+    src:
+      github:
+        user: fengb
+        repo: wz
+        ref: fix-mask
   iguanaTLS:
     src:
       github:
