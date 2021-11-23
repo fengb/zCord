@@ -11,32 +11,10 @@ const default_agent = "zCord/0.0.1";
 
 const Client = @This();
 
-allocator: *std.mem.Allocator,
-
 auth_token: []const u8,
-user_agent: []const u8,
-intents: discord.Gateway.Intents,
-presence: discord.Gateway.Presence,
+user_agent: []const u8 = default_agent,
 
-pub fn init(args: struct {
-    allocator: *std.mem.Allocator,
-    auth_token: []const u8,
-    user_agent: []const u8 = default_agent,
-    intents: discord.Gateway.Intents = .{},
-    presence: discord.Gateway.Presence = .{},
-}) Client {
-    return .{
-        .allocator = args.allocator,
-        .auth_token = args.auth_token,
-        .user_agent = args.user_agent,
-        .intents = args.intents,
-        .presence = args.presence,
-    };
-}
-
-pub fn startGateway(self: Client) !*Gateway {
-    return Gateway.start(self);
-}
+pub const startGateway = Gateway.start;
 
 pub fn sendRequest(self: Client, allocator: *std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
     var req = try https.Request.init(.{

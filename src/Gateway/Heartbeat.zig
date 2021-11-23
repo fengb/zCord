@@ -64,9 +64,9 @@ const ThreadHandler = struct {
     thread: std.Thread,
 
     fn init(gateway: *Gateway) !*ThreadHandler {
-        const result = try gateway.client.allocator.create(ThreadHandler);
-        errdefer gateway.client.allocator.destroy(result);
-        result.allocator = gateway.client.allocator;
+        const result = try gateway.allocator.create(ThreadHandler);
+        errdefer gateway.allocator.destroy(result);
+        result.allocator = gateway.allocator;
 
         try result.mailbox.init();
         errdefer result.mailbox.deinit();

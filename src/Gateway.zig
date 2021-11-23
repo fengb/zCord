@@ -15,7 +15,10 @@ const default_agent = "zCord/0.0.1";
 
 const Gateway = @This();
 
+allocator: *std.mem.Allocator,
 client: Client,
+intents: discord.Gateway.Intents,
+presence: discord.Gateway.Presence,
 
 connect_info: ?ConnectInfo,
 ssl_tunnel: ?*https.Tunnel,
@@ -36,9 +39,17 @@ pub const ConnectInfo = struct {
     session_id: std.BoundedArray(u8, 0x100),
 };
 
-pub fn start(client: Client) !*Gateway {
-    const result = try client.allocator.create(Gateway);
+pub fn start(client: Client, args: struct {
+    allocator: *std.mem.Allocator,
+    intents: discord.Gateway.Intents = .{},
+    presence: discord.Gateway.Presence = .{},
+    heartbeat: Heartbeat.Strategy = Heartbeat.Strategy.default,
+}) !*Gateway {
+    const result = try args.allocator.create(Gateway);
+    result.allocator = args.allocator;
     result.client = client;
+    result.intents = args.intents;
+    result.presence = args.presence;
 
     result.ssl_tunnel = null;
     result.write_mutex = .{};
@@ -46,8 +57,7 @@ pub fn start(client: Client) !*Gateway {
     result.connect_info = try result.connect();
     errdefer result.disconnect();
 
-    // result.heartbeat = try Heartbeat.init(result, args.heartbeat);
-    result.heartbeat = try Heartbeat.init(result, .thread);
+    result.heartbeat = try Heartbeat.init(result, args.heartbeat);
     errdefer result.heartbeat.deinit();
 
     return result;
@@ -58,11 +68,11 @@ pub fn destroy(self: *Gateway) void {
         ssl_tunnel.destroy();
     }
     self.heartbeat.deinit();
-    self.client.allocator.destroy(self);
+    self.allocator.destroy(self);
 }
 
 fn fetchGatewayHost(self: *Gateway, buffer: []u8) ![]const u8 {
-    var req = try self.client.sendRequest(self.client.allocator, .GET, "/api/v8/gateway/bot", null);
+    var req = try self.client.sendRequest(self.allocator, .GET, "/api/v8/gateway/bot", null);
     defer req.deinit();
 
     switch (req.response_code.?) {
@@ -96,7 +106,7 @@ fn connect(self: *Gateway) !ConnectInfo {
     const host = try self.fetchGatewayHost(&buf);
 
     self.ssl_tunnel = try https.Tunnel.create(.{
-        .allocator = self.client.allocator,
+        .allocator = self.allocator,
         .host = host,
     });
     errdefer self.disconnect();
@@ -162,14 +172,14 @@ fn connect(self: *Gateway) !ConnectInfo {
 
     try self.sendCommand(.{ .identify = .{
         .compress = false,
-        .intents = self.client.intents,
+        .intents = self.intents,
         .token = self.client.auth_token,
         .properties = .{
             .@"$os" = @tagName(builtin.target.os.tag),
             .@"$browser" = self.client.user_agent,
             .@"$device" = self.client.user_agent,
         },
-        .presence = self.client.presence,
+        .presence = self.presence,
     } });
 
     if (try self.wz.next()) |event| {

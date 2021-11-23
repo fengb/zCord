@@ -11,13 +11,14 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    const client = zCord.Client.init(.{
-        .allocator = &gpa.allocator,
+    const client = zCord.Client{
         .auth_token = auth,
+    };
+
+    const gateway = try client.startGateway(.{
+        .allocator = &gpa.allocator,
         .intents = .{ .guild_messages = true },
     });
-
-    const gateway = try client.startGateway();
     defer gateway.destroy();
 
     while (true) {
@@ -33,7 +34,7 @@ pub fn main() !void {
                     var buf: [0x100]u8 = undefined;
                     const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
 
-                    var req = try client.sendRequest(client.allocator, .POST, path, .{
+                    var req = try client.sendRequest(&gpa.allocator, .POST, path, .{
                         .content = "World",
                     });
                     defer req.deinit();

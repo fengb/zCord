@@ -11,13 +11,16 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    const client = zCord.Client.init(.{
-        .allocator = &gpa.allocator,
+    const client = zCord.Client{
         .auth_token = auth,
+    };
+
+    var gateway = try client.startGateway(.{
+        .allocator = &gpa.allocator,
         .intents = .{ .guild_messages = true },
     });
+    defer gateway.destroy();
 
-    var gateway = try client.startGateway();
     while (true) {
         switch (try gateway.recvEvent()) {
             .dispatch => |dispatch| {
