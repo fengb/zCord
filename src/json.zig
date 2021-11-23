@@ -74,7 +74,7 @@ pub fn Stream(comptime Reader: type) type {
 
             first_char: u8,
             element_number: usize,
-            stack_level: u8,
+            stack_level: usize,
 
             fn init(ctx: *Self) Error!?Element {
                 ctx.assertState(&.{ .ValueBegin, .ValueBeginNoClosing, .TopLevelBegin });
@@ -112,7 +112,7 @@ pub fn Stream(comptime Reader: type) type {
                     .kind = kind,
                     .first_char = byte,
                     .element_number = ctx.element_number,
-                    .stack_level = ctx.parser.stack_used,
+                    .stack_level = ctx.parser.stack.len,
                 };
             }
 
@@ -294,7 +294,7 @@ pub fn Stream(comptime Reader: type) type {
 
                 // This array has been closed out.
                 // TODO: evaluate to see if this is actually robust
-                if (self.ctx.parser.stack_used < self.stack_level) {
+                if (self.ctx.parser.stack.len < self.stack_level) {
                     return null;
                 }
 
@@ -346,7 +346,7 @@ pub fn Stream(comptime Reader: type) type {
                 while (true) {
                     // This object has been closed out.
                     // TODO: evaluate to see if this is actually robust
-                    if (self.ctx.parser.stack_used < self.stack_level) {
+                    if (self.ctx.parser.stack.len < self.stack_level) {
                         return null;
                     }
 
@@ -471,11 +471,11 @@ pub fn Stream(comptime Reader: type) type {
                         }
                     },
                     .Array, .Object => {
-                        if (self.ctx.parser.stack_used == self.stack_level - 1) {
+                        if (self.ctx.parser.stack.len == self.stack_level - 1) {
                             // Assert the parser state
                             return null;
                         } else {
-                            self.ctx.assert(self.ctx.parser.stack_used >= self.stack_level);
+                            self.ctx.assert(self.ctx.parser.stack.len >= self.stack_level);
                         }
                     },
                 }
@@ -489,7 +489,7 @@ pub fn Stream(comptime Reader: type) type {
                             .Number => self.ctx.assert(token == .Number),
                             .String => self.ctx.assert(token == .String),
                             .Array => {
-                                if (self.ctx.parser.stack_used >= self.stack_level) {
+                                if (self.ctx.parser.stack.len >= self.stack_level) {
                                     continue;
                                 }
                                 // Number followed by ArrayEnd generates two tokens at once
@@ -498,7 +498,7 @@ pub fn Stream(comptime Reader: type) type {
                                 return .ArrayEnd;
                             },
                             .Object => {
-                                if (self.ctx.parser.stack_used >= self.stack_level) {
+                                if (self.ctx.parser.stack.len >= self.stack_level) {
                                     continue;
                                 }
                                 // Number followed by ObjectEnd generates two tokens at once
