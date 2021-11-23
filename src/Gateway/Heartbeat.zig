@@ -1,5 +1,5 @@
 const std = @import("std");
-const Client = @import("../Client.zig");
+const Gateway = @import("../Gateway.zig");
 const util = @import("../util.zig");
 
 const log = std.log.scoped(.zCord);
@@ -19,10 +19,10 @@ pub const Strategy = union(enum) {
     pub const default = Strategy.thread;
 };
 
-pub fn init(client: *Client, strategy: Strategy) !Heartbeat {
+pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
     return Heartbeat{
         .handler = switch (strategy) {
-            .thread => .{ .thread = try ThreadHandler.init(client) },
+            .thread => .{ .thread = try ThreadHandler.init(gateway) },
             .callback => |cb| .{ .callback = cb },
             .manual => .{
                 .callback = .{
@@ -63,15 +63,15 @@ const ThreadHandler = struct {
     mailbox: util.Mailbox(Message),
     thread: std.Thread,
 
-    fn init(client: *Client) !*ThreadHandler {
-        const result = try client.allocator.create(ThreadHandler);
-        errdefer client.allocator.destroy(result);
-        result.allocator = client.allocator;
+    fn init(gateway: *Gateway) !*ThreadHandler {
+        const result = try gateway.client.allocator.create(ThreadHandler);
+        errdefer gateway.client.allocator.destroy(result);
+        result.allocator = gateway.client.allocator;
 
         try result.mailbox.init();
         errdefer result.mailbox.deinit();
 
-        result.thread = try std.Thread.spawn(.{}, handler, .{ result, client });
+        result.thread = try std.Thread.spawn(.{}, handler, .{ result, gateway });
         return result;
     }
 
@@ -83,14 +83,14 @@ const ThreadHandler = struct {
         ctx.allocator.destroy(ctx);
     }
 
-    fn handler(ctx: *ThreadHandler, client: *Client) void {
+    fn handler(ctx: *ThreadHandler, gateway: *Gateway) void {
         var heartbeat_interval_ms: u64 = 0;
         var ack = false;
         while (true) {
             if (heartbeat_interval_ms == 0) {
                 switch (ctx.mailbox.get()) {
                     .start => {
-                        heartbeat_interval_ms = client.connect_info.?.heartbeat_interval_ms;
+                        heartbeat_interval_ms = gateway.connect_info.?.heartbeat_interval_ms;
                         ack = true;
                     },
                     .ack, .stop => {},
@@ -115,7 +115,7 @@ const ThreadHandler = struct {
                 if (ack) {
                     ack = false;
                     // TODO: actually check this or fix threads + async
-                    if (nosuspend client.sendCommand(.{ .heartbeat = client.connect_info.?.seq })) |_| {
+                    if (nosuspend gateway.sendCommand(.{ .heartbeat = gateway.connect_info.?.seq })) |_| {
                         log.info(">> ♡", .{});
                         continue;
                     } else |_| {
@@ -125,7 +125,7 @@ const ThreadHandler = struct {
                     log.info("Missed heartbeat. Reconnecting...", .{});
                 }
 
-                client.ssl_tunnel.?.shutdown() catch |err| {
+                gateway.ssl_tunnel.?.shutdown() catch |err| {
                     log.info("Shutdown failed: {}", .{err});
                 };
                 heartbeat_interval_ms = 0;

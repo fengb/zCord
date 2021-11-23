@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const hzzp = @import("hzzp");
 const wz = @import("wz");
 
-const Heartbeat = @import("Client/Heartbeat.zig");
+const Client = @import("Client.zig");
+const Heartbeat = @import("Gateway/Heartbeat.zig");
 const https = @import("https.zig");
 const discord = @import("discord.zig");
 const json = @import("json.zig");
@@ -13,18 +13,14 @@ const util = @import("util.zig");
 const log = std.log.scoped(.zCord);
 const default_agent = "zCord/0.0.1";
 
-const Client = @This();
+const Gateway = @This();
 
-allocator: *std.mem.Allocator,
+client: Client,
 
-auth_token: []const u8,
-user_agent: []const u8,
-intents: discord.Gateway.Intents,
-presence: discord.Gateway.Presence,
 connect_info: ?ConnectInfo,
-
 ssl_tunnel: ?*https.Tunnel,
 wz: WzClient,
+event_stream: json.Stream(WzClient.PayloadReader),
 wz_buffer: [0x1000]u8,
 write_mutex: std.Thread.Mutex,
 
@@ -40,43 +36,33 @@ pub const ConnectInfo = struct {
     session_id: std.BoundedArray(u8, 0x100),
 };
 
-pub fn create(args: struct {
-    allocator: *std.mem.Allocator,
-    auth_token: []const u8,
-    user_agent: []const u8 = default_agent,
-    intents: discord.Gateway.Intents = .{},
-    presence: discord.Gateway.Presence = .{},
-    heartbeat: Heartbeat.Strategy = Heartbeat.Strategy.default,
-}) !*Client {
-    const result = try args.allocator.create(Client);
-    errdefer args.allocator.destroy(result);
-    result.allocator = args.allocator;
-
-    result.auth_token = args.auth_token;
-    result.user_agent = args.user_agent;
-    result.intents = args.intents;
-    result.presence = args.presence;
-    result.connect_info = null;
+pub fn start(client: Client) !*Gateway {
+    const result = try client.allocator.create(Gateway);
+    result.client = client;
 
     result.ssl_tunnel = null;
     result.write_mutex = .{};
 
-    result.heartbeat = try Heartbeat.init(result, args.heartbeat);
+    result.connect_info = try result.connect();
+    errdefer result.disconnect();
+
+    // result.heartbeat = try Heartbeat.init(result, args.heartbeat);
+    result.heartbeat = try Heartbeat.init(result, .thread);
     errdefer result.heartbeat.deinit();
 
     return result;
 }
 
-pub fn destroy(self: *Client) void {
+pub fn destroy(self: *Gateway) void {
     if (self.ssl_tunnel) |ssl_tunnel| {
         ssl_tunnel.destroy();
     }
     self.heartbeat.deinit();
-    self.allocator.destroy(self);
+    self.client.allocator.destroy(self);
 }
 
-fn fetchGatewayHost(self: *Client, buffer: []u8) ![]const u8 {
-    var req = try self.sendRequest(self.allocator, .GET, "/api/v8/gateway/bot", null);
+fn fetchGatewayHost(self: *Gateway, buffer: []u8) ![]const u8 {
+    var req = try self.client.sendRequest(self.client.allocator, .GET, "/api/v8/gateway/bot", null);
     defer req.deinit();
 
     switch (req.response_code.?) {
@@ -103,14 +89,14 @@ fn fetchGatewayHost(self: *Client, buffer: []u8) ![]const u8 {
     }
 }
 
-fn connect(self: *Client) !ConnectInfo {
+fn connect(self: *Gateway) !ConnectInfo {
     std.debug.assert(self.ssl_tunnel == null);
 
     var buf: [0x100]u8 = undefined;
     const host = try self.fetchGatewayHost(&buf);
 
     self.ssl_tunnel = try https.Tunnel.create(.{
-        .allocator = self.allocator,
+        .allocator = self.client.allocator,
         .host = host,
     });
     errdefer self.disconnect();
@@ -164,7 +150,7 @@ fn connect(self: *Client) !ConnectInfo {
 
     if (self.connect_info) |old_info| {
         try self.sendCommand(.{ .@"resume" = .{
-            .token = self.auth_token,
+            .token = self.client.auth_token,
             .seq = old_info.seq,
             .session_id = old_info.session_id.constSlice(),
         } });
@@ -176,14 +162,14 @@ fn connect(self: *Client) !ConnectInfo {
 
     try self.sendCommand(.{ .identify = .{
         .compress = false,
-        .intents = self.intents,
-        .token = self.auth_token,
+        .intents = self.client.intents,
+        .token = self.client.auth_token,
         .properties = .{
             .@"$os" = @tagName(builtin.target.os.tag),
-            .@"$browser" = self.user_agent,
-            .@"$device" = self.user_agent,
+            .@"$browser" = self.client.user_agent,
+            .@"$device" = self.client.user_agent,
         },
-        .presence = self.presence,
+        .presence = self.client.presence,
     } });
 
     if (try self.wz.next()) |event| {
@@ -234,14 +220,14 @@ fn connect(self: *Client) !ConnectInfo {
     return result;
 }
 
-fn disconnect(self: *Client) void {
+fn disconnect(self: *Gateway) void {
     if (self.ssl_tunnel) |ssl_tunnel| {
         ssl_tunnel.destroy();
         self.ssl_tunnel = null;
     }
 }
 
-pub fn ws(self: *Client, context: anytype, comptime handler: type) !void {
+pub fn reconnect(self: *Gateway) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         self.connect_info = self.connect() catch |err| switch (err) {
@@ -256,34 +242,12 @@ pub fn ws(self: *Client, context: anytype, comptime handler: type) !void {
                 continue;
             },
         };
-        defer self.disconnect();
-
-        if (@hasDecl(handler, "handleConnect")) {
-            handler.handleConnect(context, self.connect_info.?);
-        }
-
-        reconnect_wait = 1;
-
         self.heartbeat.send(.start);
-        defer self.heartbeat.send(.stop);
-
-        self.listen(context, handler) catch |err| switch (err) {
-            error.ConnectionReset => continue,
-            error.InvalidSession => {
-                self.connect_info = null;
-                continue;
-            },
-            else => |e| {
-                // TODO: convert this to inline switch once available
-                if (!util.errSetContains(WzClient.ReadNextError, e)) {
-                    return e;
-                }
-            },
-        };
+        return;
     }
 }
 
-fn processCloseEvent(self: *Client) !void {
+fn processCloseEvent(self: *Gateway) !void {
     const event = (try self.wz.next()).?;
 
     const code_num = std.mem.readIntBig(u16, event.chunk.data[0..2]);
@@ -335,17 +299,26 @@ fn processCloseEvent(self: *Client) !void {
     }
 }
 
-fn listen(self: *Client, context: anytype, comptime handler: type) !void {
+pub const GatewayEvent = union(enum) {
+    dispatch: struct {
+        name: []const u8,
+        data: JsonElement,
+    },
+};
+
+pub fn recvEvent(self: *Gateway) !GatewayEvent {
+    try self.wz.flushReader();
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
             .text => {
-                self.processChunks(self.wz.reader(), context, handler) catch |err| switch (err) {
+                const gateway_event = self.processEvent(self.wz.reader()) catch |err| switch (err) {
                     error.ConnectionReset, error.InvalidSession => |e| return e,
                     else => {
                         log.warn("Process chunks failed: {s}", .{err});
+                        continue;
                     },
                 };
-                try self.wz.flushReader();
+                return gateway_event orelse continue;
             },
             .ping, .pong => {},
             .close => try self.processCloseEvent(),
@@ -358,11 +331,11 @@ fn listen(self: *Client, context: anytype, comptime handler: type) !void {
     return error.ConnectionReset;
 }
 
-fn processChunks(self: *Client, reader: anytype, context: anytype, comptime handler: type) !void {
-    var stream = json.stream(reader);
+fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
+    self.event_stream = json.stream(reader);
     errdefer |err| {
-        if (util.errSetContains(@TypeOf(stream).ParseError, err)) {
-            log.warn("{}", .{stream.debugInfo()});
+        if (util.errSetContains(@TypeOf(self.event_stream).ParseError, err)) {
+            log.warn("{}", .{self.event_stream.debugInfo()});
         }
     }
 
@@ -370,7 +343,7 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
     var name: ?[]u8 = null;
     var op: ?discord.Gateway.Opcode = null;
 
-    const root = try stream.root();
+    const root = try self.event_stream.root();
 
     while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match.key) {
         .t => {
@@ -388,11 +361,10 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
-                    try handler.handleDispatch(
-                        context,
-                        name orelse return error.DispatchWithoutName,
-                        match.value,
-                    );
+                    return GatewayEvent{ .dispatch = .{
+                        .name = name orelse return error.DispatchWithoutName,
+                        .data = match.value,
+                    } };
                 },
                 .heartbeat_ack => self.heartbeat.send(.ack),
                 .reconnect => {
@@ -416,9 +388,11 @@ fn processChunks(self: *Client, reader: anytype, context: anytype, comptime hand
             _ = try match.value.finalizeToken();
         },
     };
+
+    return null;
 }
 
-pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
+pub fn sendCommand(self: *Gateway, command: discord.Gateway.Command) !void {
     if (self.ssl_tunnel == null) return error.NotConnected;
 
     var buf: [0x1000]u8 = undefined;
@@ -429,35 +403,6 @@ pub fn sendCommand(self: *Client, command: discord.Gateway.Command) !void {
 
     try self.wz.writeHeader(.{ .opcode = .text, .length = msg.len });
     try self.wz.writeChunk(msg);
-}
-
-pub fn sendRequest(self: *Client, allocator: *std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
-    var req = try https.Request.init(.{
-        .allocator = allocator,
-        .host = "discord.com",
-        .method = method,
-        .path = path,
-        .user_agent = self.user_agent,
-    });
-    errdefer req.deinit();
-
-    try req.client.writeHeaderValue("Accept", "application/json");
-    try req.client.writeHeaderValue("Content-Type", "application/json");
-    try req.client.writeHeaderValue("Authorization", self.auth_token);
-
-    switch (@typeInfo(@TypeOf(body))) {
-        .Null => _ = try req.sendEmptyBody(),
-        .Optional => {
-            if (body == null) {
-                _ = try req.sendEmptyBody();
-            } else {
-                _ = try req.sendPrint("{}", .{json.format(body)});
-            }
-        },
-        else => _ = try req.sendPrint("{}", .{json.format(body)}),
-    }
-
-    return req;
 }
 
 test {
