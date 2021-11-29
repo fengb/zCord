@@ -24,7 +24,7 @@ pub fn main() !void {
     while (true) {
         switch (try gateway.recvEvent()) {
             .dispatch => |dispatch| {
-                if (!std.mem.eql(u8, dispatch.name, "MESSAGE_CREATE")) return;
+                if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
 
                 var msg_buffer: [0x1000]u8 = undefined;
                 var msg: ?[]u8 = null;

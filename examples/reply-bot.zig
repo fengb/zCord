@@ -24,7 +24,7 @@ pub fn main() !void {
     while (true) {
         switch (try gateway.recvEvent()) {
             .dispatch => |dispatch| {
-                if (!std.mem.eql(u8, dispatch.name, "MESSAGE_CREATE")) return;
+                if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
                 const paths = try zCord.json.path.match(dispatch.data, struct {
                     @"channel_id": zCord.Snowflake(.channel),
                     @"content": std.BoundedArray(u8, 0x1000),

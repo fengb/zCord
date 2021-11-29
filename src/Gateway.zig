@@ -311,7 +311,7 @@ fn processCloseEvent(self: *Gateway) !void {
 
 pub const GatewayEvent = union(enum) {
     dispatch: struct {
-        name: []const u8,
+        name: std.BoundedArray(u8, 32),
         data: JsonElement,
     },
 };
@@ -372,7 +372,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
                     return GatewayEvent{ .dispatch = .{
-                        .name = name orelse return error.DispatchWithoutName,
+                        .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
                         .data = match.value,
                     } };
                 },
