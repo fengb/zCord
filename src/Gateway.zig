@@ -35,7 +35,6 @@ pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
 pub const ConnectInfo = struct {
     heartbeat_interval_ms: u64,
     seq: u32,
-    user_id: discord.Snowflake(.user),
     session_id: std.BoundedArray(u8, 0x100),
 };
 
@@ -54,7 +53,7 @@ pub fn start(client: Client, args: struct {
     result.ssl_tunnel = null;
     result.write_mutex = .{};
 
-    result.connect_info = try result.connect();
+    result.connect_info = try result.reconnect();
     errdefer result.disconnect();
 
     result.heartbeat = try Heartbeat.init(result, args.heartbeat);
@@ -71,8 +70,8 @@ pub fn destroy(self: *Gateway) void {
     self.allocator.destroy(self);
 }
 
-fn fetchGatewayHost(self: *Gateway, buffer: []u8) ![]const u8 {
-    var req = try self.client.sendRequest(self.allocator, .GET, "/api/v8/gateway/bot", null);
+fn fetchGatewayHost(temp_allocator: *std.mem.Allocator, client: Client, buffer: []u8) ![]const u8 {
+    var req = try client.sendRequest(temp_allocator, .GET, "/api/v8/gateway/bot", null);
     defer req.deinit();
 
     switch (req.response_code.?) {
@@ -103,7 +102,7 @@ fn connect(self: *Gateway) !ConnectInfo {
     std.debug.assert(self.ssl_tunnel == null);
 
     var buf: [0x100]u8 = undefined;
-    const host = try self.fetchGatewayHost(&buf);
+    const host = try fetchGatewayHost(self.allocator, self.client, &buf);
 
     self.ssl_tunnel = try https.Tunnel.create(.{
         .allocator = self.allocator,
@@ -154,10 +153,6 @@ fn connect(self: *Gateway) !ConnectInfo {
     }
     try flush_error;
 
-    if (result.heartbeat_interval_ms == 0) {
-        return error.MalformedHelloResponse;
-    }
-
     if (self.connect_info) |old_info| {
         try self.sendCommand(.{ .@"resume" = .{
             .token = self.client.auth_token,
@@ -165,7 +160,6 @@ fn connect(self: *Gateway) !ConnectInfo {
             .session_id = old_info.session_id.constSlice(),
         } });
         result.seq = old_info.seq;
-        result.user_id = old_info.user_id;
         result.session_id = old_info.session_id;
         return result;
     }
@@ -196,12 +190,12 @@ fn connect(self: *Gateway) !ConnectInfo {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
+        // TODO: possibly "rewind" this to allow data reconsumption
         const paths = try json.path.match(root, struct {
             @"t": std.BoundedArray(u8, 0x100),
             @"s": ?u32,
             @"op": u8,
             @"d.session_id": std.BoundedArray(u8, 0x100),
-            @"d.user.id": discord.Snowflake(.user),
             @"d.user.username": std.BoundedArray(u8, 0x100),
             @"d.user.discriminator": std.BoundedArray(u8, 0x100),
         });
@@ -217,7 +211,6 @@ fn connect(self: *Gateway) !ConnectInfo {
             result.seq = seq;
         }
 
-        result.user_id = paths.@"d.user.id";
         result.session_id = paths.@"d.session_id";
 
         log.info("Connected -- {s}#{s}", .{
@@ -237,10 +230,10 @@ fn disconnect(self: *Gateway) void {
     }
 }
 
-pub fn reconnect(self: *Gateway) !void {
+pub fn reconnect(self: *Gateway) !ConnectInfo {
     var reconnect_wait: u64 = 1;
     while (true) {
-        self.connect_info = self.connect() catch |err| switch (err) {
+        return self.connect() catch |err| switch (err) {
             error.AuthenticationFailed,
             error.DisallowedIntents,
             error.CertificateVerificationFailed,
@@ -252,8 +245,6 @@ pub fn reconnect(self: *Gateway) !void {
                 continue;
             },
         };
-        self.heartbeat.send(.start);
-        return;
     }
 }
 
@@ -317,6 +308,23 @@ pub const GatewayEvent = union(enum) {
 };
 
 pub fn recvEvent(self: *Gateway) !GatewayEvent {
+    while (true) {
+        if (self.ssl_tunnel == null) {
+            self.connect_info = try self.reconnect();
+            self.heartbeat.send(.{ .start = self.connect_info.?.heartbeat_interval_ms });
+        }
+
+        return self.recvEventNoReconnect() catch |err| switch (err) {
+            error.ConnectionReset, error.InvalidSession => {
+                self.disconnect();
+                continue;
+            },
+            else => |e| return e,
+        };
+    }
+}
+
+fn recvEventNoReconnect(self: *Gateway) !GatewayEvent {
     try self.wz.flushReader();
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {

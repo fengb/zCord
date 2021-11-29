@@ -10,13 +10,18 @@ handler: union(enum) {
     callback: CallbackHandler,
 },
 
-pub const Message = enum { start, ack, stop, deinit };
 pub const Strategy = union(enum) {
     thread,
-    manual,
     callback: CallbackHandler,
 
     pub const default = Strategy.thread;
+};
+
+pub const Message = union(enum) {
+    start: u64,
+    ack,
+    stop,
+    deinit,
 };
 
 pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
@@ -24,17 +29,6 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
         .handler = switch (strategy) {
             .thread => .{ .thread = try ThreadHandler.init(gateway) },
             .callback => |cb| .{ .callback = cb },
-            .manual => .{
-                .callback = .{
-                    .context = undefined,
-                    .func = struct {
-                        fn noop(ctx: *c_void, msg: Message) void {
-                            _ = ctx;
-                            _ = msg;
-                        }
-                    }.noop,
-                },
-            },
         },
     };
 }
@@ -85,13 +79,13 @@ const ThreadHandler = struct {
 
     fn handler(ctx: *ThreadHandler, gateway: *Gateway) void {
         var heartbeat_interval_ms: u64 = 0;
-        var ack = false;
+        var acked = false;
         while (true) {
             if (heartbeat_interval_ms == 0) {
                 switch (ctx.mailbox.get()) {
-                    .start => {
-                        heartbeat_interval_ms = gateway.connect_info.?.heartbeat_interval_ms;
-                        ack = true;
+                    .start => |heartbeat| {
+                        heartbeat_interval_ms = heartbeat;
+                        acked = true;
                     },
                     .ack, .stop => {},
                     .deinit => return,
@@ -101,10 +95,13 @@ const ThreadHandler = struct {
                 const timeout_ms = heartbeat_interval_ms - 1000;
                 if (ctx.mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
-                        .start => {},
+                        .start => |heartbeat| {
+                            heartbeat_interval_ms = heartbeat;
+                            acked = true;
+                        },
                         .ack => {
                             log.info("<< ♥", .{});
-                            ack = true;
+                            acked = true;
                         },
                         .stop => heartbeat_interval_ms = 0,
                         .deinit => return,
@@ -112,8 +109,8 @@ const ThreadHandler = struct {
                     continue;
                 }
 
-                if (ack) {
-                    ack = false;
+                if (acked) {
+                    acked = false;
                     // TODO: actually check this or fix threads + async
                     if (nosuspend gateway.sendCommand(.{ .heartbeat = gateway.connect_info.?.seq })) |_| {
                         log.info(">> ♡", .{});
