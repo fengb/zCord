@@ -137,7 +137,7 @@ pub const Gateway = struct {
             session_id: []const u8,
             seq: u32,
         },
-        heartbeat: u32,
+        heartbeat: ?u32,
         request_guild_members: struct {
             guild_id: Snowflake(.guild),
             query: []const u8 = "",

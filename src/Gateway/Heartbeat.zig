@@ -7,18 +7,18 @@ const log = std.log.scoped(.zCord);
 const Heartbeat = @This();
 handler: union(enum) {
     thread: *ThreadHandler,
-    callback: CallbackHandler,
+    manual: void,
 },
 
-pub const Strategy = union(enum) {
+pub const Strategy = enum {
     thread,
-    callback: CallbackHandler,
+    manual,
 
     pub const default = Strategy.thread;
 };
 
-pub const Message = union(enum) {
-    start: u64,
+pub const Message = enum {
+    start,
     ack,
     stop,
     deinit,
@@ -28,7 +28,7 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
     return Heartbeat{
         .handler = switch (strategy) {
             .thread => .{ .thread = try ThreadHandler.init(gateway) },
-            .callback => |cb| .{ .callback = cb },
+            .manual => .manual,
         },
     };
 }
@@ -36,21 +36,16 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
 pub fn deinit(self: Heartbeat) void {
     switch (self.handler) {
         .thread => |thread| thread.deinit(),
-        .callback => |cb| cb.func(cb.context, .deinit),
+        .manual => {},
     }
 }
 
 pub fn send(self: Heartbeat, msg: Message) void {
     switch (self.handler) {
         .thread => |thread| thread.mailbox.putOverwrite(msg),
-        .callback => |cb| cb.func(cb.context, msg),
+        .manual => {},
     }
 }
-
-pub const CallbackHandler = struct {
-    context: *c_void,
-    func: fn (ctx: *c_void, msg: Message) void,
-};
 
 const ThreadHandler = struct {
     allocator: *std.mem.Allocator,
@@ -78,32 +73,27 @@ const ThreadHandler = struct {
     }
 
     fn handler(ctx: *ThreadHandler, gateway: *Gateway) void {
-        var heartbeat_interval_ms: u64 = 0;
+        var active = true;
         var acked = false;
         while (true) {
-            if (heartbeat_interval_ms == 0) {
+            if (active) {
                 switch (ctx.mailbox.get()) {
-                    .start => |heartbeat| {
-                        heartbeat_interval_ms = heartbeat;
+                    .start => {
+                        active = false;
                         acked = true;
                     },
                     .ack, .stop => {},
                     .deinit => return,
                 }
             } else {
-                // Force fire the heartbeat earlier
-                const timeout_ms = heartbeat_interval_ms - 1000;
-                if (ctx.mailbox.getWithTimeout(timeout_ms * std.time.ns_per_ms)) |msg| {
+                if (ctx.mailbox.getWithTimeout(gateway.heartbeat_interval_ms * std.time.ns_per_ms)) |msg| {
                     switch (msg) {
-                        .start => |heartbeat| {
-                            heartbeat_interval_ms = heartbeat;
-                            acked = true;
-                        },
+                        .start => acked = true,
                         .ack => {
                             log.info("<< ♥", .{});
                             acked = true;
                         },
-                        .stop => heartbeat_interval_ms = 0,
+                        .stop => active = false,
                         .deinit => return,
                     }
                     continue;
@@ -112,7 +102,7 @@ const ThreadHandler = struct {
                 if (acked) {
                     acked = false;
                     // TODO: actually check this or fix threads + async
-                    if (nosuspend gateway.sendCommand(.{ .heartbeat = gateway.connect_info.?.seq })) |_| {
+                    if (nosuspend gateway.sendCommand(.{ .heartbeat = gateway.seq })) {
                         log.info(">> ♡", .{});
                         continue;
                     } else |_| {
@@ -125,7 +115,7 @@ const ThreadHandler = struct {
                 gateway.ssl_tunnel.?.shutdown() catch |err| {
                     log.info("Shutdown failed: {}", .{err});
                 };
-                heartbeat_interval_ms = 0;
+                active = false;
             }
         }
     }

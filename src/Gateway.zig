@@ -20,23 +20,20 @@ client: Client,
 intents: discord.Gateway.Intents,
 presence: discord.Gateway.Presence,
 
-connect_info: ?ConnectInfo,
 ssl_tunnel: ?*https.Tunnel,
 wz: WzClient,
 event_stream: json.Stream(WzClient.PayloadReader),
 wz_buffer: [0x1000]u8,
 write_mutex: std.Thread.Mutex,
 
+heartbeat_interval_ms: u64,
+seq: u32,
+session_id: ?std.BoundedArray(u8, 0x100),
+
 heartbeat: Heartbeat,
 
 const WzClient = wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tunnel.Client.Writer);
 pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
-
-pub const ConnectInfo = struct {
-    heartbeat_interval_ms: u64,
-    seq: u32,
-    session_id: std.BoundedArray(u8, 0x100),
-};
 
 pub fn start(client: Client, args: struct {
     allocator: *std.mem.Allocator,
@@ -52,8 +49,10 @@ pub fn start(client: Client, args: struct {
 
     result.ssl_tunnel = null;
     result.write_mutex = .{};
+    result.seq = 0;
+    result.session_id = null;
 
-    result.connect_info = try result.reconnect();
+    try result.reconnect();
     errdefer result.disconnect();
 
     result.heartbeat = try Heartbeat.init(result, args.heartbeat);
@@ -98,7 +97,7 @@ fn fetchGatewayHost(temp_allocator: *std.mem.Allocator, client: Client, buffer: 
     }
 }
 
-fn connect(self: *Gateway) !ConnectInfo {
+fn connect(self: *Gateway) !void {
     std.debug.assert(self.ssl_tunnel == null);
 
     var buf: [0x100]u8 = undefined;
@@ -129,8 +128,6 @@ fn connect(self: *Gateway) !ConnectInfo {
         std.debug.assert(event == .header);
     }
 
-    var result: ConnectInfo = undefined;
-
     var flush_error: WzClient.ReadNextError!void = {};
     {
         var stream = json.stream(self.wz.reader());
@@ -149,19 +146,17 @@ fn connect(self: *Gateway) !ConnectInfo {
             return error.MalformedHelloResponse;
         }
 
-        result.heartbeat_interval_ms = paths.@"d.heartbeat_interval";
+        self.heartbeat_interval_ms = paths.@"d.heartbeat_interval";
     }
     try flush_error;
 
-    if (self.connect_info) |old_info| {
+    if (self.session_id) |session_id| {
         try self.sendCommand(.{ .@"resume" = .{
             .token = self.client.auth_token,
-            .seq = old_info.seq,
-            .session_id = old_info.session_id.constSlice(),
+            .seq = self.seq,
+            .session_id = session_id.constSlice(),
         } });
-        result.seq = old_info.seq;
-        result.session_id = old_info.session_id;
-        return result;
+        return;
     }
 
     try self.sendCommand(.{ .identify = .{
@@ -208,10 +203,10 @@ fn connect(self: *Gateway) !ConnectInfo {
         }
 
         if (paths.@"s") |seq| {
-            result.seq = seq;
+            self.seq = seq;
         }
 
-        result.session_id = paths.@"d.session_id";
+        self.session_id = paths.@"d.session_id";
 
         log.info("Connected -- {s}#{s}", .{
             paths.@"d.user.username".constSlice(),
@@ -219,8 +214,6 @@ fn connect(self: *Gateway) !ConnectInfo {
         });
     }
     try flush_error;
-
-    return result;
 }
 
 fn disconnect(self: *Gateway) void {
@@ -230,7 +223,7 @@ fn disconnect(self: *Gateway) void {
     }
 }
 
-pub fn reconnect(self: *Gateway) !ConnectInfo {
+pub fn reconnect(self: *Gateway) !void {
     var reconnect_wait: u64 = 1;
     while (true) {
         return self.connect() catch |err| switch (err) {
@@ -310,13 +303,19 @@ pub const GatewayEvent = union(enum) {
 pub fn recvEvent(self: *Gateway) !GatewayEvent {
     while (true) {
         if (self.ssl_tunnel == null) {
-            self.connect_info = try self.reconnect();
-            self.heartbeat.send(.{ .start = self.connect_info.?.heartbeat_interval_ms });
+            try self.reconnect();
+            self.heartbeat.send(.start);
         }
 
         return self.recvEventNoReconnect() catch |err| switch (err) {
-            error.ConnectionReset, error.InvalidSession => {
+            error.ConnectionReset => {
                 self.disconnect();
+                continue;
+            },
+            error.InvalidSession => {
+                self.disconnect();
+                self.seq = 0;
+                self.session_id = null;
                 continue;
             },
             else => |e| return e,
@@ -369,7 +368,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
         },
         .s => {
             if (try match.value.optionalNumber(u32)) |seq| {
-                self.connect_info.?.seq = seq;
+                self.seq = seq;
             }
         },
         .op => {
@@ -378,7 +377,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
         .d => {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
-                    log.info("<< {d} -- {s}", .{ self.connect_info.?.seq, name });
+                    log.info("<< {d} -- {s}", .{ self.seq, name });
                     return GatewayEvent{ .dispatch = .{
                         .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
                         .data = match.value,
