@@ -22,24 +22,30 @@ pub fn main() !void {
     defer gateway.destroy();
 
     while (true) {
-        switch (try gateway.recvEvent()) {
-            .dispatch => |dispatch| {
-                if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
-                const paths = try zCord.json.path.match(dispatch.data, struct {
-                    @"channel_id": zCord.Snowflake(.channel),
-                    @"content": std.BoundedArray(u8, 0x1000),
+        processEvent(gateway, try gateway.recvEvent()) catch |err| {
+            std.debug.print("{}\n", .{err});
+        };
+    }
+}
+
+fn processEvent(gateway: *zCord.Gateway, event: zCord.Gateway.Event) !void {
+    switch (event) {
+        .dispatch => |dispatch| {
+            if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
+            const paths = try zCord.json.path.match(dispatch.data, struct {
+                @"channel_id": zCord.Snowflake(.channel),
+                @"content": std.BoundedArray(u8, 0x1000),
+            });
+
+            if (std.mem.eql(u8, paths.content.constSlice(), "Hello")) {
+                var buf: [0x100]u8 = undefined;
+                const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
+
+                var req = try gateway.client.sendRequest(gateway.allocator, .POST, path, .{
+                    .content = "World",
                 });
-
-                if (std.mem.eql(u8, paths.content.constSlice(), "Hello")) {
-                    var buf: [0x100]u8 = undefined;
-                    const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
-
-                    var req = try client.sendRequest(&gpa.allocator, .POST, path, .{
-                        .content = "World",
-                    });
-                    defer req.deinit();
-                }
-            },
-        }
+                defer req.deinit();
+            }
+        },
     }
 }

@@ -293,14 +293,14 @@ fn processCloseEvent(self: *Gateway) !void {
     }
 }
 
-pub const GatewayEvent = union(enum) {
+pub const Event = union(enum) {
     dispatch: struct {
         name: std.BoundedArray(u8, 32),
         data: JsonElement,
     },
 };
 
-pub fn recvEvent(self: *Gateway) !GatewayEvent {
+pub fn recvEvent(self: *Gateway) !Gateway.Event {
     while (true) {
         if (self.ssl_tunnel == null) {
             try self.reconnect();
@@ -323,7 +323,7 @@ pub fn recvEvent(self: *Gateway) !GatewayEvent {
     }
 }
 
-fn recvEventNoReconnect(self: *Gateway) !GatewayEvent {
+fn recvEventNoReconnect(self: *Gateway) !Event {
     try self.wz.flushReader();
     while (try self.wz.next()) |event| {
         switch (event.header.opcode) {
@@ -348,7 +348,7 @@ fn recvEventNoReconnect(self: *Gateway) !GatewayEvent {
     return error.ConnectionReset;
 }
 
-fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
+fn processEvent(self: *Gateway, reader: anytype) !?Event {
     self.event_stream = json.stream(reader);
     errdefer |err| {
         if (util.errSetContains(@TypeOf(self.event_stream).ParseError, err)) {
@@ -378,7 +378,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?GatewayEvent {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.seq, name });
-                    return GatewayEvent{ .dispatch = .{
+                    return Event{ .dispatch = .{
                         .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
                         .data = match.value,
                     } };

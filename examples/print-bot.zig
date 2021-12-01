@@ -22,31 +22,37 @@ pub fn main() !void {
     defer gateway.destroy();
 
     while (true) {
-        switch (try gateway.recvEvent()) {
-            .dispatch => |dispatch| {
-                if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
+        processEvent(try gateway.recvEvent()) catch |err| {
+            std.debug.print("{}\n", .{err});
+        };
+    }
+}
 
-                var msg_buffer: [0x1000]u8 = undefined;
-                var msg: ?[]u8 = null;
-                var channel_id: ?zCord.Snowflake(.channel) = null;
+fn processEvent(event: zCord.Gateway.Event) !void {
+    switch (event) {
+        .dispatch => |dispatch| {
+            if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
 
-                while (try dispatch.data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
-                    .content => {
-                        msg = match.value.stringBuffer(&msg_buffer) catch |err| switch (err) {
-                            error.StreamTooLong => &msg_buffer,
-                            else => |e| return e,
-                        };
-                        _ = try match.value.finalizeToken();
-                    },
-                    .channel_id => {
-                        channel_id = try zCord.Snowflake(.channel).consumeJsonElement(match.value);
-                    },
-                };
+            var msg_buffer: [0x1000]u8 = undefined;
+            var msg: ?[]u8 = null;
+            var channel_id: ?zCord.Snowflake(.channel) = null;
 
-                if (msg != null and channel_id != null) {
-                    std.debug.print(">> {d} -- {s}\n", .{ channel_id.?, msg.? });
-                }
-            },
-        }
+            while (try dispatch.data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
+                .content => {
+                    msg = match.value.stringBuffer(&msg_buffer) catch |err| switch (err) {
+                        error.StreamTooLong => &msg_buffer,
+                        else => |e| return e,
+                    };
+                    _ = try match.value.finalizeToken();
+                },
+                .channel_id => {
+                    channel_id = try zCord.Snowflake(.channel).consumeJsonElement(match.value);
+                },
+            };
+
+            if (msg != null and channel_id != null) {
+                std.debug.print(">> {d} -- {s}\n", .{ channel_id.?, msg.? });
+            }
+        },
     }
 }
