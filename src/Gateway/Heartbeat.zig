@@ -74,12 +74,12 @@ const ThreadHandler = struct {
 
     fn handler(ctx: *ThreadHandler, gateway: *Gateway) void {
         var active = true;
-        var acked = false;
+        var acked = true;
         while (true) {
-            if (active) {
+            if (!active) {
                 switch (ctx.mailbox.get()) {
                     .start => {
-                        active = false;
+                        active = true;
                         acked = true;
                     },
                     .ack, .stop => {},

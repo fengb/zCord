@@ -324,9 +324,14 @@ pub fn recvEvent(self: *Gateway) !Gateway.Event {
 }
 
 fn recvEventNoReconnect(self: *Gateway) !Event {
-    try self.wz.flushReader();
-    while (try self.wz.next()) |event| {
-        switch (event.header.opcode) {
+    while (true) {
+        try self.wz.flushReader();
+        const event = self.wz.next() catch |err| switch (err) {
+            error.EndOfStream => return error.ConnectionReset,
+            else => |e| return e,
+        };
+
+        switch (event.?.header.opcode) {
             .text => {
                 const gateway_event = self.processEvent(self.wz.reader()) catch |err| switch (err) {
                     error.ConnectionReset, error.InvalidSession => |e| return e,
@@ -343,9 +348,6 @@ fn recvEventNoReconnect(self: *Gateway) !Event {
             else => return error.WtfWtf,
         }
     }
-
-    log.info("Websocket close frame - {{}}: no reason provided. Reconnecting...", .{});
-    return error.ConnectionReset;
 }
 
 fn processEvent(self: *Gateway, reader: anytype) !?Event {
