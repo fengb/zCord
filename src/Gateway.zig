@@ -294,6 +294,7 @@ fn processCloseEvent(self: *Gateway) !void {
 }
 
 pub const Event = union(enum) {
+    heartbeat_ack,
     dispatch: struct {
         name: std.BoundedArray(u8, 32),
         data: JsonElement,
@@ -385,7 +386,10 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
                         .data = match.value,
                     } };
                 },
-                .heartbeat_ack => self.heartbeat.send(.ack),
+                .heartbeat_ack => {
+                    self.heartbeat.send(.ack);
+                    return Event{ .heartbeat_ack = {} };
+                },
                 .reconnect => {
                     log.info("Discord reconnect. Reconnecting...", .{});
                     return error.ConnectionReset;
@@ -404,7 +408,6 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
                     match.value.debugDump(std.io.getStdErr().writer()) catch {};
                 },
             }
-            _ = try match.value.finalizeToken();
         },
     };
 

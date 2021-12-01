@@ -30,6 +30,7 @@ pub fn main() !void {
 
 fn processEvent(gateway: *zCord.Gateway, event: zCord.Gateway.Event) !void {
     switch (event) {
+        .heartbeat_ack => {},
         .dispatch => |dispatch| {
             if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
             const paths = try zCord.json.path.match(dispatch.data, struct {

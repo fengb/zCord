@@ -30,6 +30,7 @@ pub fn main() !void {
 
 fn processEvent(event: zCord.Gateway.Event) !void {
     switch (event) {
+        .heartbeat_ack => {},
         .dispatch => |dispatch| {
             if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
 
