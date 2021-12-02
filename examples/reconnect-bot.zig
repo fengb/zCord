@@ -24,7 +24,8 @@ pub fn main() !void {
     _ = try std.Thread.spawn(.{}, chaosMonkey, .{gateway});
 
     while (true) {
-        _ = try gateway.recvEvent();
+        const event = try gateway.recvEvent();
+        defer event.deinit();
     }
 }
 

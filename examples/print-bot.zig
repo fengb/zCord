@@ -22,14 +22,16 @@ pub fn main() !void {
     defer gateway.destroy();
 
     while (true) {
-        processEvent(try gateway.recvEvent()) catch |err| {
+        const event = try gateway.recvEvent();
+        defer event.deinit();
+        processEvent(event) catch |err| {
             std.debug.print("{}\n", .{err});
         };
     }
 }
 
 fn processEvent(event: zCord.Gateway.Event) !void {
-    switch (event) {
+    switch (event.payload) {
         .heartbeat_ack => {},
         .dispatch => |dispatch| {
             if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;

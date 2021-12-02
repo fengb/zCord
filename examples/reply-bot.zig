@@ -22,14 +22,16 @@ pub fn main() !void {
     defer gateway.destroy();
 
     while (true) {
-        processEvent(gateway, try gateway.recvEvent()) catch |err| {
+        const event = try gateway.recvEvent();
+        defer event.deinit();
+        processEvent(event) catch |err| {
             std.debug.print("{}\n", .{err});
         };
     }
 }
 
-fn processEvent(gateway: *zCord.Gateway, event: zCord.Gateway.Event) !void {
-    switch (event) {
+fn processEvent(event: zCord.Gateway.Event) !void {
+    switch (event.payload) {
         .heartbeat_ack => {},
         .dispatch => |dispatch| {
             if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
@@ -42,7 +44,7 @@ fn processEvent(gateway: *zCord.Gateway, event: zCord.Gateway.Event) !void {
                 var buf: [0x100]u8 = undefined;
                 const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
 
-                var req = try gateway.client.sendRequest(gateway.allocator, .POST, path, .{
+                var req = try event.gateway.client.sendRequest(event.gateway.allocator, .POST, path, .{
                     .content = "World",
                 });
                 defer req.deinit();

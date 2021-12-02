@@ -22,7 +22,7 @@ presence: discord.Gateway.Presence,
 
 ssl_tunnel: ?*https.Tunnel,
 wz: WzClient,
-event_stream: json.Stream(WzClient.PayloadReader),
+event_stream: ?json.Stream(WzClient.PayloadReader),
 wz_buffer: [0x1000]u8,
 write_mutex: std.Thread.Mutex,
 
@@ -48,6 +48,7 @@ pub fn start(client: Client, args: struct {
     result.presence = args.presence;
 
     result.ssl_tunnel = null;
+    result.event_stream = null;
     result.write_mutex = .{};
     result.seq = 0;
     result.session_id = null;
@@ -293,15 +294,25 @@ fn processCloseEvent(self: *Gateway) !void {
     }
 }
 
-pub const Event = union(enum) {
-    heartbeat_ack,
-    dispatch: struct {
-        name: std.BoundedArray(u8, 32),
-        data: JsonElement,
+pub const Event = struct {
+    gateway: *Gateway,
+    payload: union(enum) {
+        heartbeat_ack,
+        dispatch: struct {
+            name: std.BoundedArray(u8, 32),
+            data: JsonElement,
+        },
     },
+
+    pub fn deinit(event: Event) void {
+        event.gateway.event_stream = null;
+    }
 };
 
-pub fn recvEvent(self: *Gateway) !Gateway.Event {
+pub fn recvEvent(self: *Gateway) !Event {
+    std.debug.assert(self.event_stream == null); // Can only recv one event at a time
+    errdefer self.event_stream = null;
+
     while (true) {
         if (self.ssl_tunnel == null) {
             try self.reconnect();
@@ -354,8 +365,8 @@ fn recvEventNoReconnect(self: *Gateway) !Event {
 fn processEvent(self: *Gateway, reader: anytype) !?Event {
     self.event_stream = json.stream(reader);
     errdefer |err| {
-        if (util.errSetContains(@TypeOf(self.event_stream).ParseError, err)) {
-            log.warn("{}", .{self.event_stream.debugInfo()});
+        if (util.errSetContains(@TypeOf(self.event_stream.?).ParseError, err)) {
+            log.warn("{}", .{self.event_stream.?.debugInfo()});
         }
     }
 
@@ -363,7 +374,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
     var name: ?[]u8 = null;
     var op: ?discord.Gateway.Opcode = null;
 
-    const root = try self.event_stream.root();
+    const root = try self.event_stream.?.root();
 
     while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match.key) {
         .t => {
@@ -381,14 +392,22 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
                     log.info("<< {d} -- {s}", .{ self.seq, name });
-                    return Event{ .dispatch = .{
-                        .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
-                        .data = match.value,
-                    } };
+                    return Event{
+                        .gateway = self,
+                        .payload = .{
+                            .dispatch = .{
+                                .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
+                                .data = match.value,
+                            },
+                        },
+                    };
                 },
                 .heartbeat_ack => {
                     self.heartbeat.send(.ack);
-                    return Event{ .heartbeat_ack = {} };
+                    return Event{
+                        .gateway = self,
+                        .payload = .heartbeat_ack,
+                    };
                 },
                 .reconnect => {
                     log.info("Discord reconnect. Reconnecting...", .{});
