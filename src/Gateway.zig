@@ -330,7 +330,11 @@ pub fn recvEvent(self: *Gateway) !Event {
                 self.session_id = null;
                 continue;
             },
-            else => |e| return e,
+            else => {
+                log.warn("Unexpected error: {}", .{err});
+                self.disconnect();
+                continue;
+            },
         };
     }
 }
