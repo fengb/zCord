@@ -11,32 +11,29 @@ pub fn main() !void {
     var auth_buf: [0x100]u8 = undefined;
     const auth = try std.fmt.bufPrint(&auth_buf, "Bot {s}", .{std.os.getenv("DISCORD_AUTH") orelse return error.AuthNotFound});
 
-    const client = try zCord.Client.create(.{
-        .allocator = &gpa.allocator,
+    const client = zCord.Client{
         .auth_token = auth,
+    };
+
+    const gateway = try client.startGateway(.{
+        .allocator = &gpa.allocator,
         .intents = .{},
     });
-    defer client.destroy();
+    defer gateway.destroy();
 
-    _ = try std.Thread.spawn(.{}, chaosMonkey, .{client});
+    _ = try std.Thread.spawn(.{}, chaosMonkey, .{gateway});
 
-    try client.ws({}, struct {
-        pub fn handleConnect(_: void, info: zCord.Client.ConnectInfo) void {
-            std.debug.print("Connected as {}\n", .{info.user_id});
-        }
-
-        pub fn handleDispatch(_: void, name: []const u8, data: zCord.JsonElement) !void {
-            _ = name;
-            _ = data;
-        }
-    });
+    while (true) {
+        const event = try gateway.recvEvent();
+        defer event.deinit();
+    }
 }
 
-fn chaosMonkey(client: *zCord.Client) void {
+fn chaosMonkey(gateway: *zCord.Gateway) void {
     while (true) {
         std.time.sleep(5 * std.time.ns_per_s);
         // This is *not* stable.
-        if (client.ssl_tunnel) |ssl_tunnel| {
+        if (gateway.ssl_tunnel) |ssl_tunnel| {
             ssl_tunnel.shutdown() catch |err| {
                 std.debug.print("Shutdown error: {}\n", .{err});
             };
