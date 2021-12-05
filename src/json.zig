@@ -116,6 +116,18 @@ pub fn Stream(comptime Reader: type) type {
                 };
             }
 
+            pub fn pathMatch(self: Element, comptime T: type) !T {
+                return try path.match(self, T);
+            }
+
+            pub fn pathMatchAlloc(self: Element, allocator: *std.mem.Allocator, comptime T: type) !T {
+                return try path.matchAlloc(allocator, self, T);
+            }
+
+            pub fn pathMatchFree(_: Element, allocator: *std.mem.Allocator, value: anytype) void {
+                return try path.freeMatch(allocator, value);
+            }
+
             pub fn boolean(self: Element) Error!bool {
                 try self.validateType(.Boolean);
                 self.ctx.assertState(&.{ .TrueLiteral1, .FalseLiteral1 });

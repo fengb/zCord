@@ -138,7 +138,7 @@ fn connect(self: *Gateway) !void {
         errdefer |err| log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
-        const paths = try json.path.match(root, struct {
+        const paths = try root.pathMatch(struct {
             @"op": u8,
             @"d.heartbeat_interval": u32,
         });
@@ -187,7 +187,7 @@ fn connect(self: *Gateway) !void {
 
         const root = try stream.root();
         // TODO: possibly "rewind" this to allow data reconsumption
-        const paths = try json.path.match(root, struct {
+        const paths = try root.pathMatch(struct {
             @"t": std.BoundedArray(u8, 0x100),
             @"s": ?u32,
             @"op": u8,

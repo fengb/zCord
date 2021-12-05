@@ -34,7 +34,7 @@ fn processEvent(event: zCord.Gateway.Event) !void {
     switch (event.name) {
         else => {},
         .message_create => {
-            const paths = try zCord.json.path.match(event.data, struct {
+            const paths = try event.data.pathMatch(struct {
                 @"channel_id": zCord.Snowflake(.channel),
                 @"content": std.BoundedArray(u8, 0x1000),
             });
