@@ -27,7 +27,7 @@ pub const Message = enum {
 pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
     return Heartbeat{
         .handler = switch (strategy) {
-            .thread => .{ .thread = try ThreadHandler.init(gateway) },
+            .thread => .{ .thread = try ThreadHandler.create(gateway) },
             .callback => |cb| .{ .callback = cb },
         },
     };
@@ -35,7 +35,7 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
 
 pub fn deinit(self: Heartbeat) void {
     switch (self.handler) {
-        .thread => |thread| thread.deinit(),
+        .thread => |thread| thread.destroy(),
         .callback => {},
     }
 }
@@ -57,7 +57,7 @@ const ThreadHandler = struct {
     mailbox: util.Mailbox(Message),
     thread: std.Thread,
 
-    fn init(gateway: *Gateway) !*ThreadHandler {
+    fn create(gateway: *Gateway) !*ThreadHandler {
         const result = try gateway.allocator.create(ThreadHandler);
         errdefer gateway.allocator.destroy(result);
         result.allocator = gateway.allocator;
@@ -69,7 +69,7 @@ const ThreadHandler = struct {
         return result;
     }
 
-    fn deinit(ctx: *ThreadHandler) void {
+    fn destroy(ctx: *ThreadHandler) void {
         ctx.mailbox.putOverwrite(.deinit);
         // Reap the thread
         ctx.thread.join();
