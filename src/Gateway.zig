@@ -296,13 +296,8 @@ fn processCloseEvent(self: *Gateway) !void {
 
 pub const Event = struct {
     gateway: *Gateway,
-    payload: union(enum) {
-        heartbeat_ack,
-        dispatch: struct {
-            name: std.BoundedArray(u8, 32),
-            data: JsonElement,
-        },
-    },
+    name: discord.Gateway.EventName,
+    data: JsonElement,
 
     pub fn deinit(event: Event) void {
         event.gateway.event_stream = null;
@@ -374,15 +369,17 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
         }
     }
 
-    var name_buf: [32]u8 = undefined;
-    var name: ?[]u8 = null;
+    var name: ?discord.Gateway.EventName = null;
     var op: ?discord.Gateway.Opcode = null;
 
     const root = try self.event_stream.?.root();
 
     while (try root.objectMatch(enum { t, s, op, d })) |match| switch (match.key) {
         .t => {
-            name = try match.value.optionalStringBuffer(&name_buf);
+            var buf: [32]u8 = undefined;
+            if (try match.value.optionalStringBuffer(&buf)) |raw| {
+                name = discord.Gateway.EventName.parse(raw);
+            }
         },
         .s => {
             if (try match.value.optionalNumber(u32)) |seq| {
@@ -395,23 +392,15 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
         .d => {
             switch (op orelse return error.DataBeforeOp) {
                 .dispatch => {
-                    log.info("<< {d} -- {s}", .{ self.seq, name });
                     return Event{
                         .gateway = self,
-                        .payload = .{
-                            .dispatch = .{
-                                .name = std.BoundedArray(u8, 32).fromSlice(name orelse return error.DispatchWithoutName) catch unreachable,
-                                .data = match.value,
-                            },
-                        },
+                        .name = name orelse return error.DispatchWithoutName,
+                        .data = match.value,
                     };
                 },
                 .heartbeat_ack => {
                     self.heartbeat.send(.ack);
-                    return Event{
-                        .gateway = self,
-                        .payload = .heartbeat_ack,
-                    };
+                    _ = try match.value.finalizeToken();
                 },
                 .reconnect => {
                     log.info("Discord reconnect. Reconnecting...", .{});

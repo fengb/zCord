@@ -31,11 +31,10 @@ pub fn main() !void {
 }
 
 fn processEvent(event: zCord.Gateway.Event) !void {
-    switch (event.payload) {
-        .heartbeat_ack => {},
-        .dispatch => |dispatch| {
-            if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
-            const paths = try zCord.json.path.match(dispatch.data, struct {
+    switch (event.name) {
+        else => {},
+        .message_create => {
+            const paths = try zCord.json.path.match(event.data, struct {
                 @"channel_id": zCord.Snowflake(.channel),
                 @"content": std.BoundedArray(u8, 0x1000),
             });

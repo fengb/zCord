@@ -172,6 +172,88 @@ pub const Gateway = struct {
         }
     };
 
+    pub const EventName = union(enum) {
+        hello,
+        ready,
+        resumed,
+        reconnect,
+        invalid_session,
+        channel_create,
+        channel_update,
+        channel_delete,
+        channel_pins_update,
+        thread_create,
+        thread_update,
+        thread_delete,
+        thread_list_sync,
+        thread_member_update,
+        thread_members_update,
+        guild_create,
+        guild_update,
+        guild_delete,
+        guild_ban_add,
+        guild_ban_remove,
+        guild_emojis_update,
+        guild_stickers_update,
+        guild_integrations_update,
+        guild_member_add,
+        guild_member_remove,
+        guild_member_update,
+        guild_members_chunk,
+        guild_role_create,
+        guild_role_update,
+        guild_role_delete,
+        guild_scheduled_event_create,
+        guild_scheduled_event_update,
+        guild_scheduled_event_delete,
+        guild_scheduled_event_user_add,
+        guild_scheduled_event_user_remove,
+        integration_create,
+        integration_update,
+        integration_delete,
+        interaction_create,
+        invite_create,
+        invite_delete,
+        message_create,
+        message_update,
+        message_delete,
+        message_delete_bulk,
+        message_reaction_add,
+        message_reaction_remove,
+        message_reaction_remove_all,
+        message_reaction_remove_emoji,
+        presence_update,
+        stage_instance_create,
+        stage_instance_delete,
+        stage_instance_update,
+        typing_start,
+        user_update,
+        voice_state_update,
+        voice_server_update,
+        webhooks_update,
+        UNKNOWN: std.BoundedArray(u8, 32),
+
+        pub fn parse(raw: []const u8) EventName {
+            const Tag = std.meta.Tag(EventName);
+            var buf: [32]u8 = undefined;
+            const lower = std.ascii.lowerString(&buf, raw);
+
+            inline for (@typeInfo(Tag).Enum.fields) |field| {
+                if (std.mem.eql(u8, lower, field.name)) {
+                    if (comptime std.mem.eql(u8, field.name, "UNKNOWN")) {
+                        unreachable;
+                    } else {
+                        return @unionInit(EventName, field.name, {});
+                    }
+                }
+            }
+
+            return EventName{
+                .UNKNOWN = std.BoundedArray(u8, 32).fromSlice(raw) catch unreachable,
+            };
+        }
+    };
+
     pub const Intents = packed struct {
         guilds: bool = false,
         guild_members: bool = false,

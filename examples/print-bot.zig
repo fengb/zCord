@@ -31,16 +31,14 @@ pub fn main() !void {
 }
 
 fn processEvent(event: zCord.Gateway.Event) !void {
-    switch (event.payload) {
-        .heartbeat_ack => {},
-        .dispatch => |dispatch| {
-            if (!std.mem.eql(u8, dispatch.name.constSlice(), "MESSAGE_CREATE")) return;
-
+    switch (event.name) {
+        else => {},
+        .message_create => {
             var msg_buffer: [0x1000]u8 = undefined;
             var msg: ?[]u8 = null;
             var channel_id: ?zCord.Snowflake(.channel) = null;
 
-            while (try dispatch.data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
+            while (try event.data.objectMatch(enum { content, channel_id })) |match| switch (match.key) {
                 .content => {
                     msg = match.value.stringBuffer(&msg_buffer) catch |err| switch (err) {
                         error.StreamTooLong => &msg_buffer,
