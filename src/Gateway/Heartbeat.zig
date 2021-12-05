@@ -7,12 +7,12 @@ const log = std.log.scoped(.zCord);
 const Heartbeat = @This();
 handler: union(enum) {
     thread: *ThreadHandler,
-    manual: void,
+    callback: CallbackHandler,
 },
 
-pub const Strategy = enum {
+pub const Strategy = union(enum) {
     thread,
-    manual,
+    callback: CallbackHandler,
 
     pub const default = Strategy.thread;
 };
@@ -28,7 +28,7 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
     return Heartbeat{
         .handler = switch (strategy) {
             .thread => .{ .thread = try ThreadHandler.init(gateway) },
-            .manual => .manual,
+            .callback => |cb| .{ .callback = cb },
         },
     };
 }
@@ -36,16 +36,21 @@ pub fn init(gateway: *Gateway, strategy: Strategy) !Heartbeat {
 pub fn deinit(self: Heartbeat) void {
     switch (self.handler) {
         .thread => |thread| thread.deinit(),
-        .manual => {},
+        .callback => {},
     }
 }
 
 pub fn send(self: Heartbeat, msg: Message) void {
     switch (self.handler) {
         .thread => |thread| thread.mailbox.putOverwrite(msg),
-        .manual => {},
+        .callback => |cb| cb.func(cb.context, msg),
     }
 }
+
+pub const CallbackHandler = struct {
+    context: *c_void,
+    func: fn (ctx: *c_void, msg: Message) void,
+};
 
 const ThreadHandler = struct {
     allocator: *std.mem.Allocator,
