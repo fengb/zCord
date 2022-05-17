@@ -19,9 +19,9 @@ deps:
   wz:
     src:
       github:
-        user: fengb
+        user: truemedian
         repo: wz
-        ref: fix-mask
+        ref: master
   iguanaTLS:
     src:
       github:

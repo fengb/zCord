@@ -15,7 +15,7 @@ const default_agent = "zCord/0.0.1";
 
 const Gateway = @This();
 
-allocator: *std.mem.Allocator,
+allocator: std.mem.Allocator,
 client: Client,
 intents: discord.Gateway.Intents,
 presence: discord.Gateway.Presence,
@@ -36,7 +36,7 @@ const WzClient = wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tun
 pub const JsonElement = zasp.json.Stream(WzClient.PayloadReader).Element;
 
 pub fn start(client: Client, args: struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     intents: discord.Gateway.Intents = .{},
     presence: discord.Gateway.Presence = .{},
     heartbeat: Heartbeat.Strategy = Heartbeat.Strategy.default,
@@ -70,7 +70,7 @@ pub fn destroy(self: *Gateway) void {
     self.allocator.destroy(self);
 }
 
-fn fetchGatewayHost(temp_allocator: *std.mem.Allocator, client: Client, buffer: []u8) ![]const u8 {
+fn fetchGatewayHost(temp_allocator: std.mem.Allocator, client: Client, buffer: []u8) ![]const u8 {
     var req = try client.sendRequest(temp_allocator, .GET, "/api/v8/gateway/bot", null);
     defer req.deinit();
 
@@ -114,7 +114,7 @@ fn connect(self: *Gateway) !void {
     const writer = self.ssl_tunnel.?.client.writer();
 
     // Handshake
-    var handshake = WzClient.handshake(&self.wz_buffer, reader, writer, std.crypto.random.*);
+    var handshake = WzClient.handshake(&self.wz_buffer, reader, writer, std.crypto.random);
     try handshake.writeStatusLine("/?v=6&encoding=json");
     try handshake.writeHeaderValue("Host", host);
     try handshake.finishHeaders();

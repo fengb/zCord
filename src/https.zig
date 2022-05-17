@@ -8,7 +8,7 @@ pub const root_ca = struct {
 
     /// Initializes the bundled root certificates
     /// This is a shared chain that's used whenever an PEM is not passed in
-    pub fn preload(allocator: *std.mem.Allocator) !void {
+    pub fn preload(allocator: std.mem.Allocator) !void {
         std.debug.assert(cert_chain == null);
         var fbs = std.io.fixedBufferStream(pem);
         cert_chain = try iguanaTLS.x509.CertificateChain.from_pem(allocator, fbs.reader());
@@ -21,7 +21,7 @@ pub const root_ca = struct {
 };
 
 pub const Tunnel = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     client: Client,
     tcp_conn: std.net.Stream,
@@ -30,7 +30,7 @@ pub const Tunnel = struct {
     pub const Client = iguanaTLS.Client(std.net.Stream.Reader, std.net.Stream.Writer, iguanaTLS.ciphersuites.all, false);
 
     pub fn create(args: struct {
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         host: []const u8,
         port: u16 = 443,
         pem: ?[]const u8 = null,
@@ -55,6 +55,7 @@ pub const Tunnel = struct {
             .cert_verifier = .default,
             .trusted_certificates = trusted_chain.data.items,
             .temp_allocator = args.allocator,
+            .rand = std.crypto.random,
         }, args.host);
         errdefer result.client.close_notify() catch {};
 
@@ -80,7 +81,7 @@ pub const Tunnel = struct {
 };
 
 pub const Request = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     tunnel: *Tunnel,
     buffer: []u8,
     client: hzzp.base.client.BaseClient(Tunnel.Client.Reader, Tunnel.Client.Writer),
@@ -89,7 +90,7 @@ pub const Request = struct {
     pub const Method = enum { GET, POST, PUT, DELETE, PATCH };
 
     pub fn init(args: struct {
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         host: []const u8,
         port: u16 = 443,
         method: Method,

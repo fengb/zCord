@@ -48,12 +48,12 @@ pub fn send(self: Heartbeat, msg: Message) void {
 }
 
 pub const CallbackHandler = struct {
-    context: *c_void,
-    func: fn (ctx: *c_void, msg: Message) void,
+    context: *anyopaque,
+    func: fn (ctx: *anyopaque, msg: Message) void,
 };
 
 const ThreadHandler = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     mailbox: util.Mailbox(Message),
     thread: std.Thread,
 
@@ -62,9 +62,7 @@ const ThreadHandler = struct {
         errdefer gateway.allocator.destroy(result);
         result.allocator = gateway.allocator;
 
-        try result.mailbox.init();
-        errdefer result.mailbox.deinit();
-
+        result.mailbox = .{};
         result.thread = try std.Thread.spawn(.{}, handler, .{ result, gateway });
         return result;
     }
@@ -73,7 +71,6 @@ const ThreadHandler = struct {
         ctx.mailbox.putOverwrite(.deinit);
         // Reap the thread
         ctx.thread.join();
-        ctx.mailbox.deinit();
         ctx.allocator.destroy(ctx);
     }
 

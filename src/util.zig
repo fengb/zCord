@@ -30,21 +30,9 @@ pub fn Mailbox(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        value: ?T,
-        mutex: std.Thread.Mutex,
-        reset_event: std.Thread.ResetEvent,
-
-        pub fn init(self: *Self) !void {
-            try self.reset_event.init();
-            errdefer self.reset_event.deinit();
-
-            self.value = null;
-            self.mutex = .{};
-        }
-
-        pub fn deinit(self: *Self) void {
-            self.reset_event.deinit();
-        }
+        value: ?T = null,
+        mutex: std.Thread.Mutex = .{},
+        reset_event: std.Thread.ResetEvent = .{},
 
         pub fn get(self: *Self) T {
             self.reset_event.wait();
@@ -58,7 +46,9 @@ pub fn Mailbox(comptime T: type) type {
         }
 
         pub fn getWithTimeout(self: *Self, timeout_ns: u64) ?T {
-            _ = self.reset_event.timedWait(timeout_ns);
+            self.reset_event.timedWait(timeout_ns) catch |err| switch (err) {
+                error.Timeout => {},
+            };
 
             self.mutex.lock();
             defer self.mutex.unlock();

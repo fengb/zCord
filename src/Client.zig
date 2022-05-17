@@ -16,7 +16,7 @@ user_agent: []const u8 = default_agent,
 
 pub const startGateway = Gateway.start;
 
-pub fn sendRequest(self: Client, allocator: *std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
+pub fn sendRequest(self: Client, allocator: std.mem.Allocator, method: https.Request.Method, path: []const u8, body: anytype) !https.Request {
     var req = try https.Request.init(.{
         .allocator = allocator,
         .host = "discord.com",

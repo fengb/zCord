@@ -16,7 +16,7 @@ pub fn main() !void {
     };
 
     const gateway = try client.startGateway(.{
-        .allocator = &gpa.allocator,
+        .allocator = gpa.allocator(),
         .intents = .{},
     });
     defer gateway.destroy();
