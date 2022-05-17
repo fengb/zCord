@@ -2,12 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const wz = @import("wz");
+const zasp = @import("zasp");
 
 const Client = @import("Client.zig");
 const Heartbeat = @import("Gateway/Heartbeat.zig");
 const https = @import("https.zig");
 const discord = @import("discord.zig");
-const json = @import("json.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.zCord);
@@ -22,7 +22,7 @@ presence: discord.Gateway.Presence,
 
 ssl_tunnel: ?*https.Tunnel,
 wz: WzClient,
-event_stream: ?json.Stream(WzClient.PayloadReader),
+event_stream: ?zasp.json.Stream(WzClient.PayloadReader),
 wz_buffer: [0x1000]u8,
 write_mutex: std.Thread.Mutex,
 
@@ -33,7 +33,7 @@ session_id: ?std.BoundedArray(u8, 0x100),
 heartbeat: Heartbeat,
 
 const WzClient = wz.base.client.BaseClient(https.Tunnel.Client.Reader, https.Tunnel.Client.Writer);
-pub const JsonElement = json.Stream(WzClient.PayloadReader).Element;
+pub const JsonElement = zasp.json.Stream(WzClient.PayloadReader).Element;
 
 pub fn start(client: Client, args: struct {
     allocator: *std.mem.Allocator,
@@ -85,7 +85,7 @@ fn fetchGatewayHost(temp_allocator: *std.mem.Allocator, client: Client, buffer: 
 
     try req.completeHeaders();
 
-    var stream = json.stream(req.client.reader());
+    var stream = zasp.json.stream(req.client.reader());
 
     const root = try stream.root();
     const match = (try root.objectMatchOne("url")) orelse return error.UnknownGatewayResponse;
@@ -131,7 +131,7 @@ fn connect(self: *Gateway) !void {
 
     var flush_error: WzClient.ReadNextError!void = {};
     {
-        var stream = json.stream(self.wz.reader());
+        var stream = zasp.json.stream(self.wz.reader());
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
@@ -179,7 +179,7 @@ fn connect(self: *Gateway) !void {
     }
 
     {
-        var stream = json.stream(self.wz.reader());
+        var stream = zasp.json.stream(self.wz.reader());
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
@@ -362,7 +362,7 @@ fn recvEventNoReconnect(self: *Gateway) !Event {
 }
 
 fn processEvent(self: *Gateway, reader: anytype) !?Event {
-    self.event_stream = json.stream(reader);
+    self.event_stream = zasp.json.stream(reader);
     errdefer |err| {
         if (util.errSetContains(@TypeOf(self.event_stream.?).ParseError, err)) {
             log.warn("{}", .{self.event_stream.?.debugInfo()});
@@ -430,7 +430,7 @@ pub fn sendCommand(self: *Gateway, command: discord.Gateway.Command) !void {
     if (self.ssl_tunnel == null) return error.NotConnected;
 
     var buf: [0x1000]u8 = undefined;
-    const msg = try std.fmt.bufPrint(&buf, "{s}", .{json.format(command)});
+    const msg = try std.fmt.bufPrint(&buf, "{s}", .{zasp.json.format(command)});
 
     self.write_mutex.lock();
     defer self.write_mutex.unlock();

@@ -7,3 +7,6 @@
 [submodule "lib/iguanaTLS"]
 	path = lib/iguanaTLS
 	url = https://github.com/marler8997/iguanaTLS
+[submodule "lib/zasp"]
+	path = lib/zasp
+	url = https://github.com/fengb/zasp.git

@@ -1,9 +1,9 @@
 const std = @import("std");
+const zasp = @import("zasp");
 
 const Gateway = @import("Gateway.zig");
 const https = @import("https.zig");
 const discord = @import("discord.zig");
-const json = @import("json.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.zCord);
@@ -36,10 +36,10 @@ pub fn sendRequest(self: Client, allocator: *std.mem.Allocator, method: https.Re
             if (body == null) {
                 _ = try req.sendEmptyBody();
             } else {
-                _ = try req.sendPrint("{}", .{json.format(body)});
+                _ = try req.sendPrint("{}", .{zasp.json.format(body)});
             }
         },
-        else => _ = try req.sendPrint("{}", .{json.format(body)}),
+        else => _ = try req.sendPrint("{}", .{zasp.json.format(body)}),
     }
 
     return req;

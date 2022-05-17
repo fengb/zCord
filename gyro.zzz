@@ -12,8 +12,7 @@ pkgs:
       build.zig
       examples/*.zig
       src/*.zig
-      src/Client/*.zig
-      src/json/*.zig
+      src/Gateway/*.zig
 
 deps:
   truemedian/hzzp: 0.1.7
@@ -28,4 +27,10 @@ deps:
       github:
         user: marler8997
         repo: iguanaTLS
+        ref: master
+  zasp:
+    src:
+      github:
+        user: fengb
+        repo: zasp
         ref: master

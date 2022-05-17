@@ -21,6 +21,11 @@ pub const pkgs = struct {
         .path = .{ .path = "lib/iguanaTLS/src/main.zig" },
     };
 
+    pub const zasp = std.build.Pkg{
+        .name = "zasp",
+        .path = .{ .path = "lib/zasp/src/main.zig" },
+    };
+
     pub fn addAllTo(artifact: *std.build.LibExeObjStep) void {
         @setEvalBranchQuota(1_000_000);
         inline for (std.meta.declarations(pkgs)) |decl| {
@@ -39,6 +44,7 @@ pub const exports = struct {
             pkgs.hzzp,
             pkgs.wz,
             pkgs.iguanaTLS,
+            pkgs.zasp,
         },
     };
 };

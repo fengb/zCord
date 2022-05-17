@@ -6,7 +6,7 @@ pub const Client = @import("Client.zig");
 pub const Gateway = @import("Gateway.zig");
 pub const https = @import("https.zig");
 pub const discord = @import("discord.zig");
-pub const json = @import("json.zig");
+pub const json = @import("zasp").json;
 pub const util = @import("util.zig");
 
 pub const root_ca = https.root_ca;
