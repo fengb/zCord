@@ -154,7 +154,7 @@ pub const Request = struct {
         if (event != .status) {
             return error.MissingStatus;
         }
-        const raw_code = std.math.cast(u10, event.status.code) catch 666;
+        const raw_code = std.math.cast(u10, event.status.code) orelse 666;
         self.response_code = @intToEnum(hzzp.StatusCode, raw_code);
         return self.response_code.?;
     }
