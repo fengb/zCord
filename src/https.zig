@@ -1,6 +1,7 @@
 const std = @import("std");
 const hzzp = @import("hzzp");
 const iguanaTLS = @import("iguanaTLS");
+const util = @import("util.zig");
 
 pub const root_ca = struct {
     const pem = @embedFile("../cacert.pem");
@@ -24,16 +25,17 @@ pub const Tunnel = struct {
     allocator: std.mem.Allocator,
 
     client: Client,
-    tcp_conn: std.net.Stream,
+    tcp_conn: util.TimeoutStream,
     state: enum { connected, shutdown },
 
-    pub const Client = iguanaTLS.Client(std.net.Stream.Reader, std.net.Stream.Writer, iguanaTLS.ciphersuites.all, false);
+    pub const Client = iguanaTLS.Client(util.TimeoutStream.Reader, util.TimeoutStream.Writer, iguanaTLS.ciphersuites.all, false);
 
     pub fn create(args: struct {
         allocator: std.mem.Allocator,
         host: []const u8,
         port: u16 = 443,
         pem: ?[]const u8 = null,
+        max_duration_ms: u32 = 0,
     }) !*Tunnel {
         const result = try args.allocator.create(Tunnel);
         errdefer args.allocator.destroy(result);
@@ -46,8 +48,9 @@ pub const Tunnel = struct {
         } else root_ca.cert_chain.?;
         defer if (args.pem) |_| trusted_chain.deinit();
 
-        result.tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
-        errdefer result.tcp_conn.close();
+        const tcp_conn = try std.net.tcpConnectToHost(args.allocator, args.host, args.port);
+        errdefer tcp_conn.close();
+        result.tcp_conn = try util.TimeoutStream.init(tcp_conn, args.max_duration_ms);
 
         result.client = try iguanaTLS.client_connect(.{
             .reader = result.tcp_conn.reader(),
@@ -66,7 +69,7 @@ pub const Tunnel = struct {
         std.debug.assert(self.state == .connected);
 
         const close_err = self.client.close_notify();
-        try std.os.shutdown(self.tcp_conn.handle, .both);
+        try std.os.shutdown(self.tcp_conn.underlying_stream.handle, .both);
         self.state = .shutdown;
         try close_err;
     }
@@ -87,6 +90,8 @@ pub const Request = struct {
     client: hzzp.base.client.BaseClient(Tunnel.Client.Reader, Tunnel.Client.Writer),
     response_code: ?hzzp.StatusCode,
 
+    pub var max_duration_ms: u32 = 60_000;
+
     pub const Method = enum { GET, POST, PUT, DELETE, PATCH };
 
     pub fn init(args: struct {
@@ -97,12 +102,14 @@ pub const Request = struct {
         path: []const u8,
         user_agent: []const u8 = "zCord/0.0.1",
         pem: ?[]const u8 = null,
+        max_duration_ms: ?u32 = null,
     }) !Request {
         var tunnel = try Tunnel.create(.{
             .allocator = args.allocator,
             .host = args.host,
             .port = args.port,
             .pem = args.pem,
+            .max_duration_ms = args.max_duration_ms orelse Request.max_duration_ms,
         });
         errdefer tunnel.destroy();
 
