@@ -71,7 +71,7 @@ pub fn destroy(self: *Gateway) void {
 }
 
 fn fetchGatewayHost(temp_allocator: std.mem.Allocator, client: Client, buffer: []u8) ![]const u8 {
-    var req = try client.sendRequest(temp_allocator, .GET, "/api/v8/gateway/bot", null);
+    var req = try client.sendRequest(temp_allocator, .GET, "/api/v10/gateway/bot", null);
     defer req.deinit();
 
     switch (req.response_code.?) {
@@ -115,7 +115,7 @@ fn connect(self: *Gateway) !void {
 
     // Handshake
     var handshake = WzClient.handshake(&self.wz_buffer, reader, writer, std.crypto.random);
-    try handshake.writeStatusLine("/?v=6&encoding=json");
+    try handshake.writeStatusLine("/?v=10&encoding=json");
     try handshake.writeHeaderValue("Host", host);
     try handshake.finishHeaders();
 

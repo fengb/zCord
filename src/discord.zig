@@ -263,6 +263,7 @@ pub const Gateway = struct {
         guild_webhooks: bool = false,
         guild_invites: bool = false,
         guild_voice_states: bool = false,
+
         guild_presences: bool = false,
         guild_messages: bool = false,
         guild_message_reactions: bool = false,
@@ -270,13 +271,21 @@ pub const Gateway = struct {
         direct_messages: bool = false,
         direct_message_reactions: bool = false,
         direct_message_typing: bool = false,
-        _pad: u1 = 0,
+        message_content: bool = false,
 
-        pub fn toRaw(self: Intents) u16 {
-            return @bitCast(u16, self);
+        guild_scheduled_events: bool = false,
+        _pad: u3 = 0,
+        auto_moderation_configuration: bool = false,
+        auto_moderation_execution: bool = false,
+        _pad2: u2 = 0,
+
+        _pad3: u8 = 0,
+
+        pub fn toRaw(self: Intents) u32 {
+            return @bitCast(u32, self);
         }
 
-        pub fn fromRaw(raw: u16) Intents {
+        pub fn fromRaw(raw: u32) Intents {
             return @bitCast(Intents, raw);
         }
 
