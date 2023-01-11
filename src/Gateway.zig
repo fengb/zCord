@@ -139,11 +139,11 @@ fn connect(self: *Gateway) !void {
 
         const root = try stream.root();
         const paths = try root.pathMatch(struct {
-            @"op": u8,
+            op: u8,
             @"d.heartbeat_interval": u32,
         });
 
-        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.hello)) {
+        if (paths.op != @enumToInt(discord.Gateway.Opcode.hello)) {
             return error.MalformedHelloResponse;
         }
 
@@ -188,22 +188,22 @@ fn connect(self: *Gateway) !void {
         const root = try stream.root();
         // TODO: possibly "rewind" this to allow data reconsumption
         const paths = try root.pathMatch(struct {
-            @"t": std.BoundedArray(u8, 0x100),
-            @"s": ?u32,
-            @"op": u8,
+            t: std.BoundedArray(u8, 0x100),
+            s: ?u32,
+            op: u8,
             @"d.session_id": std.BoundedArray(u8, 0x100),
             @"d.user.username": std.BoundedArray(u8, 0x100),
             @"d.user.discriminator": std.BoundedArray(u8, 0x100),
         });
 
-        if (!std.mem.eql(u8, paths.@"t".constSlice(), "READY")) {
+        if (!std.mem.eql(u8, paths.t.constSlice(), "READY")) {
             return error.MalformedIdentify;
         }
-        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.dispatch)) {
+        if (paths.op != @enumToInt(discord.Gateway.Opcode.dispatch)) {
             return error.MalformedIdentify;
         }
 
-        if (paths.@"s") |seq| {
+        if (paths.s) |seq| {
             self.seq = seq;
         }
 
