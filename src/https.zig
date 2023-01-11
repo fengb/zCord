@@ -4,7 +4,7 @@ const iguanaTLS = @import("iguanaTLS");
 const util = @import("util.zig");
 
 pub const root_ca = struct {
-    const pem = @embedFile("../cacert.pem");
+    const pem = @embedFile("cacert.pem");
     var cert_chain: ?iguanaTLS.x509.CertificateChain = null;
 
     /// Initializes the bundled root certificates

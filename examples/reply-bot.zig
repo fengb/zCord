@@ -35,8 +35,8 @@ fn processEvent(event: zCord.Gateway.Event) !void {
         else => {},
         .message_create => {
             const paths = try event.data.pathMatch(struct {
-                @"channel_id": zCord.Snowflake(.channel),
-                @"content": std.BoundedArray(u8, 0x1000),
+                channel_id: zCord.Snowflake(.channel),
+                content: std.BoundedArray(u8, 0x1000),
             });
 
             if (std.mem.eql(u8, paths.content.constSlice(), "Hello")) {

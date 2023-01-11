@@ -135,15 +135,15 @@ fn connect(self: *Gateway) !void {
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
-        errdefer |err| log.info("{}", .{stream.debugInfo()});
+        errdefer log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
         const paths = try root.pathMatch(struct {
-            @"op": u8,
+            op: u8,
             @"d.heartbeat_interval": u32,
         });
 
-        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.hello)) {
+        if (paths.op != @enumToInt(discord.Gateway.Opcode.hello)) {
             return error.MalformedHelloResponse;
         }
 
@@ -183,27 +183,27 @@ fn connect(self: *Gateway) !void {
         defer self.wz.flushReader() catch |err| {
             flush_error = err;
         };
-        errdefer |err| log.info("{}", .{stream.debugInfo()});
+        errdefer log.info("{}", .{stream.debugInfo()});
 
         const root = try stream.root();
         // TODO: possibly "rewind" this to allow data reconsumption
         const paths = try root.pathMatch(struct {
-            @"t": std.BoundedArray(u8, 0x100),
-            @"s": ?u32,
-            @"op": u8,
+            t: std.BoundedArray(u8, 0x100),
+            s: ?u32,
+            op: u8,
             @"d.session_id": std.BoundedArray(u8, 0x100),
             @"d.user.username": std.BoundedArray(u8, 0x100),
             @"d.user.discriminator": std.BoundedArray(u8, 0x100),
         });
 
-        if (!std.mem.eql(u8, paths.@"t".constSlice(), "READY")) {
+        if (!std.mem.eql(u8, paths.t.constSlice(), "READY")) {
             return error.MalformedIdentify;
         }
-        if (paths.@"op" != @enumToInt(discord.Gateway.Opcode.dispatch)) {
+        if (paths.op != @enumToInt(discord.Gateway.Opcode.dispatch)) {
             return error.MalformedIdentify;
         }
 
-        if (paths.@"s") |seq| {
+        if (paths.s) |seq| {
             self.seq = seq;
         }
 
@@ -347,7 +347,7 @@ fn recvEventNoReconnect(self: *Gateway) !Event {
                 const gateway_event = self.processEvent(self.wz.reader()) catch |err| switch (err) {
                     error.ConnectionReset, error.InvalidSession => |e| return e,
                     else => {
-                        log.warn("Process chunks failed: {s}", .{err});
+                        log.warn("Process chunks failed: {s}", .{@errorName(err)});
                         continue;
                     },
                 };
@@ -416,7 +416,7 @@ fn processEvent(self: *Gateway, reader: anytype) !?Event {
                     }
                 },
                 else => {
-                    log.info("Unhandled {} -- {s}", .{ op, name });
+                    log.info("Unhandled {} -- {?}", .{ op.?, name });
                     match.value.debugDump(std.io.getStdErr().writer()) catch {};
                 },
             }
