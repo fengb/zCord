@@ -12,6 +12,6 @@ pub const util = @import("util.zig");
 pub const root_ca = https.root_ca;
 pub const Snowflake = discord.Snowflake;
 
-test "" {
+test {
     std.testing.refAllDecls(@This());
 }

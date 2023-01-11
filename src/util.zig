@@ -112,7 +112,7 @@ pub const TimeoutStream = struct {
         return .{ .context = self };
     }
 
-    const PollFdEvents = std.meta.fieldInfo(std.os.pollfd, .events).field_type;
+    const PollFdEvents = std.meta.fieldInfo(std.os.pollfd, .events).type;
     fn pollWait(self: TimeoutStream, events: PollFdEvents) !void {
         if (self.expiration) |expiration| {
             var polling = [_]std.os.pollfd{.{

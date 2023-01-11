@@ -49,7 +49,7 @@ pub fn send(self: Heartbeat, msg: Message) void {
 
 pub const CallbackHandler = struct {
     context: *anyopaque,
-    func: fn (ctx: *anyopaque, msg: Message) void,
+    func: *const fn (ctx: *anyopaque, msg: Message) void,
 };
 
 const ThreadHandler = struct {
