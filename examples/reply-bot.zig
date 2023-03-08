@@ -41,7 +41,7 @@ fn processEvent(event: zCord.Gateway.Event) !void {
 
             if (std.mem.eql(u8, paths.content.constSlice(), "Hello")) {
                 var buf: [0x100]u8 = undefined;
-                const path = try std.fmt.bufPrint(&buf, "/api/v6/channels/{d}/messages", .{paths.channel_id});
+                const path = try std.fmt.bufPrint(&buf, "/api/v10/channels/{d}/messages", .{paths.channel_id});
 
                 var req = try event.gateway.client.sendRequest(event.gateway.allocator, .POST, path, .{
                     .content = "World",
